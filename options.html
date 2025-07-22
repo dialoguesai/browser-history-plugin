@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Extension Settings</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 1rem;
+            max-width: 400px;
+        }
+
+        label {
+            display: block;
+            margin-top: 1rem;
+        }
+
+        input,
+        button,
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            height: 4em;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Settings</h1>
+
+    <label>
+        Supabase URL:
+        <input id="supabaseUrl" type="text" placeholder="https://xyz.supabase.co" />
+    </label>
+
+    <label>
+        Supabase Anon Key:
+        <input id="anonKey" type="text" placeholder="public-anon-key" />
+    </label>
+
+    <label>
+        Skip Domains (one per line):
+        <textarea id="skipList" placeholder="e.g. airtable.com"></textarea>
+    </label>
+
+    <button id="save">Save</button>
+    <p id="status" style="color: green; visibility: hidden;">Saved!</p>
+
+    <script src="options.js"></script>
+</body>
+
+</html>
