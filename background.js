@@ -71,6 +71,9 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
         return;
     }
 
+    // ─── get device_name from storage ────────────────────────────────────────────
+    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+
     // ─── build your record ───────────────────────────────────────────────────────
     const record = {
         url,
@@ -88,6 +91,9 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
         audible: tab.audible,
         muted: tab.mutedInfo?.muted ?? false,
         opener_tab_id: tab.openerTabId ?? null,
+
+        // ─── device name ───────────────────────────────────────────────────────────
+        device_name,
     };
 
     // ─── insert into Supabase ──────────────────────────────────────────────────
@@ -117,6 +123,9 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         return;
     }
 
+    // ─── get device_name from storage ────────────────────────────────────────────
+    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+
     // Insert into Supabase alongside your page‐view data
     const { error } = await supabase
         .from('browserplugin')
@@ -128,6 +137,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
             transition_type: 'video_play',
             referrer: msg.pageUrl,
             // …any other fields you like…
+            device_name,
         });
 
     if (error) console.error('Error logging video play:', error);

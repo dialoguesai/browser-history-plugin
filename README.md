@@ -12,5 +12,7 @@ Done:
 
 Needs:
 - [ ] Improve the settings page
+- [ ] Separate table for media consumed
+- [ ] Separate table for "Starred" pages or websites
 - [ ] Add an analysis page to view browsing history
 - [ ] Have a mental health component to track when someone is just clicking to click!

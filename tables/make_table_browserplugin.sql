@@ -7,6 +7,7 @@ create table browserplugin (
   visited_at       timestamptz not null default now(),
   
   -- tab/page metadata
+  device_name      text,
   title            text,
   favicon_url      text,
   tab_id           integer,
