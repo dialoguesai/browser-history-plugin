@@ -5,7 +5,9 @@
     "description": "Logs every visited URL into a Supabase table",
     "permissions": [
         "webNavigation",
-        "storage"
+        "storage",
+        "tabs",
+        "notifications"
     ],
     "host_permissions": [
         "<all_urls>"

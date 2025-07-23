@@ -37,4 +37,49 @@ saveButton.addEventListener('click', () => {
         statusText.style.visibility = 'visible';
         setTimeout(() => statusText.style.visibility = 'hidden', 1500);
     });
+    // Display starred websites in the options page
+    document.addEventListener('DOMContentLoaded', () => {
+        chrome.storage.sync.get({
+            supabaseUrl: '',
+            anonKey: ''
+        }, async (items) => {
+            if (!items.supabaseUrl || !items.anonKey) return;
+
+            // Dynamically import Supabase client
+            const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
+            const supabase = createClient(items.supabaseUrl, items.anonKey);
+
+            // Fetch starred websites
+            const { data, error } = await supabase
+                .from('starred_websites')
+                .select('*')
+                .order('starred_at', { ascending: false })
+                .limit(50);
+
+            const container = document.getElementById('starredWebsites');
+            if (error) {
+                container.innerText = 'Error loading starred websites.';
+                return;
+            }
+            if (!data || data.length === 0) {
+                container.innerText = 'No starred websites yet.';
+                return;
+            }
+
+            // Render as a list
+            const list = document.createElement('ul');
+            list.style.paddingLeft = '1.2em';
+            data.forEach(item => {
+                const li = document.createElement('li');
+                li.style.marginBottom = '0.5em';
+                li.innerHTML = `
+                    <a href="${item.url}" target="_blank" style="font-weight:bold">${item.title || item.url}</a>
+                    <span style="color:#888; font-size:0.9em;">(${new Date(item.starred_at).toLocaleString()})</span>
+                `;
+                list.appendChild(li);
+            });
+            container.innerHTML = '';
+            container.appendChild(list);
+        });
+    });
 });

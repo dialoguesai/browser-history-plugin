@@ -1,3 +1,4 @@
+console.log('[BACKGROUND] Service worker started');
 // background.js
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
@@ -110,6 +111,88 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
 });
 
 chrome.runtime.onMessage.addListener(async (msg, sender) => {
+    // Handle starring a page
+    console.log('Saving to supabase...')
+    if (msg.type === 'STAR_PAGE') {
+        console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
+
+        if (!supabase) {
+            console.warn('[STAR_PAGE] Supabase not configured; skipping star log.');
+            chrome.notifications?.create({
+                type: 'basic',
+                iconUrl: 'icons/icon-48.png',
+                title: 'Star Website',
+                message: 'Supabase not configured. Check your settings.'
+            });
+            return;
+        }
+
+        // Log Supabase client state
+        try {
+            console.log('[STAR_PAGE] Supabase client:', supabase);
+        } catch (e) {
+            console.warn('[STAR_PAGE] Could not log Supabase client:', e);
+        }
+
+        // ─── get device_name from storage ────────────────────────────────────────────
+        const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+        console.log('[STAR_PAGE] device_name from storage:', device_name);
+
+        // Build record for starred_websites table
+        const record = {
+            url: msg.url,
+            starred_at: new Date().toISOString(),
+            device_name,
+            title: msg.title,
+            favicon_url: msg.favicon_url,
+            tab_id: msg.tab_id,
+            window_id: msg.window_id,
+            incognito: msg.incognito,
+            transition_type: msg.transition_type,
+            hostname: msg.hostname,
+            pinned: msg.pinned,
+            audible: msg.audible,
+            muted: msg.muted,
+            opener_tab_id: msg.opener_tab_id
+        };
+        console.log('[STAR_PAGE] Record to insert:', record);
+
+        try {
+            const result = await supabase
+                .from('starred_websites')
+                .insert(record);
+
+            console.log('[STAR_PAGE] Supabase insert result:', result);
+
+            if (result.error) {
+                console.error('[STAR_PAGE] Supabase star insert error:', result.error);
+                chrome.notifications?.create({
+                    type: 'basic',
+                    iconUrl: 'icons/icon-48.png',
+                    title: 'Star Website',
+                    message: 'Failed to star website: ' + (result.error.message || 'Unknown error')
+                });
+            } else {
+                console.log('[STAR_PAGE] Starred website successfully:', record);
+                chrome.notifications?.create({
+                    type: 'basic',
+                    iconUrl: 'icons/icon-48.png',
+                    title: 'Star Website',
+                    message: 'Website starred successfully!'
+                });
+            }
+        } catch (err) {
+            console.error('[STAR_PAGE] Unexpected error starring website', err);
+            chrome.notifications?.create({
+                type: 'basic',
+                iconUrl: 'icons/icon-48.png',
+                title: 'Star Website',
+                message: 'Unexpected error: ' + (err.message || 'Unknown error')
+            });
+        }
+        return;
+    }
+
     if (msg.type !== 'VIDEO_PLAY') return;
     if (!supabase) {
         console.warn('Supabase not configured; skipping video log.');
