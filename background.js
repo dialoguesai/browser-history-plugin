@@ -95,6 +95,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
 
         // ─── device name ───────────────────────────────────────────────────────────
         device_name,
+        referred_by: null
     };
 
     // ─── insert into Supabase ──────────────────────────────────────────────────
@@ -153,7 +154,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
             pinned: msg.pinned,
             audible: msg.audible,
             muted: msg.muted,
-            opener_tab_id: msg.opener_tab_id
+            opener_tab_id: msg.opener_tab_id,
+            referred_by: null
         };
         console.log('[STAR_PAGE] Record to insert:', record);
 

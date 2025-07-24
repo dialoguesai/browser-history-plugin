@@ -22,6 +22,7 @@ create table browserplugin (
   audible          boolean,
   muted            boolean,
   opener_tab_id    integer
+  referred_by      text
 );
 -- create the starred_websites table for important/starred pages
 create table starred_websites (
@@ -44,5 +45,6 @@ create table starred_websites (
   pinned           boolean,
   audible          boolean,
   muted            boolean,
-  opener_tab_id    integer
+  opener_tab_id    integer,
+  referred_by      text
 );
