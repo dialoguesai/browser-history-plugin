@@ -111,9 +111,58 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     }
 });
 
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (!tab.url || tab.url === 'about:blank') return;
+
+        // Optionally, filter out skipDomains here as you do elsewhere
+        let hostname;
+        try { hostname = new URL(tab.url).hostname; }
+        catch { return; }
+        if (skipDomains.some(d => hostname === d || hostname.endsWith(`.${d}`))) {
+            console.log(`Skipped domain on tab activation: ${hostname}`);
+            return;
+        }
+
+        // Get device_name from storage
+        const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+
+        // Build your record
+        const record = {
+            url: tab.url,
+            visited_at: new Date().toISOString(),
+            title: tab.title,
+            favicon_url: tab.favIconUrl,
+            tab_id: tab.id,
+            window_id: tab.windowId,
+            incognito: tab.incognito,
+            transition_type: 'tab_activated',
+            hostname,
+            pinned: tab.pinned,
+            audible: tab.audible,
+            muted: tab.mutedInfo?.muted ?? false,
+            opener_tab_id: tab.openerTabId ?? null,
+            device_name,
+            referred_by: null
+        };
+
+        // Insert into Supabase
+        if (supabase) {
+            const { error } = await supabase.from('browserplugin').insert(record);
+            if (error) console.error('Supabase insert error (tab activated):', error);
+            else console.log('Logged tab activation:', record);
+        }
+    } catch (err) {
+        console.error('Error handling tab activation', err);
+    }
+});
+
 chrome.runtime.onMessage.addListener(async (msg, sender) => {
+    console.log('🛰️ BG onMessage:', msg, sender);
     // Handle starring a page
-    console.log('Saving to supabase...')
+    // console.log('Saving to supabase...')
     if (msg.type === 'STAR_PAGE') {
         console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
 
@@ -195,36 +244,123 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         return;
     }
 
-    if (msg.type !== 'VIDEO_PLAY') return;
-    if (!supabase) {
-        console.warn('Supabase not configured; skipping video log.');
+    // Enhanced event tracking for "click" and "highlight" events
+    if (msg.event_type === 'click' || msg.event_type === 'highlight') {
+        if (!supabase) {
+            console.warn(`[${msg.event_type}] Supabase not configured; skipping event log.`);
+            return;
+        }
+
+        // Try to fill in tab details if we can
+        let tabInfo = {};
+        try {
+            if (sender.tab?.id) {
+                const t = await chrome.tabs.get(sender.tab.id);
+                tabInfo = {
+                    tab_id: t.id,
+                    window_id: t.windowId,
+                    incognito: t.incognito,
+                    pinned: t.pinned,
+                    audible: t.audible,
+                    muted: t.mutedInfo?.muted ?? false,
+                    opener_tab_id: t.openerTabId ?? null
+                };
+            }
+        } catch (e) {
+            console.warn('Could not fetch tab info for event:', e);
+        }
+
+        // Build the full record to satisfy every non-null column
+        const record = {
+            url: msg.url,
+            visited_at: msg.visited_at,
+            title: msg.title,
+            favicon_url: msg.favicon_url,
+            hostname: msg.hostname,
+            transition_type: msg.transition_type,
+            device_name: msg.device_name,
+            user_id: msg.user_id,
+            referred_by: msg.referred_by,
+            event_type: msg.event_type,
+            content: msg.content,
+            ...tabInfo
+        };
+
+        try {
+            const { error } = await supabase
+                .from('browserplugin')
+                .insert(record);
+
+            if (error) {
+                console.error(`[${msg.event_type}] Supabase insert error:`, error);
+            } else {
+                console.log(`[${msg.event_type}] Event logged:`, record);
+            }
+        } catch (err) {
+            console.error(`[${msg.event_type}] Unexpected error logging event`, err);
+        }
+
         return;
     }
+    if (msg.event_type === 'VIDEO_PLAY') {
+        if (!supabase) return;
 
-    // Optional: filter out hosts you don’t care about
-    const host = new URL(msg.videoUrl).hostname;
-    if (skipDomains.some(d => host === d || host.endsWith(`.${d}`))) {
-        console.log('Skipped video from', host);
-        return;
-    }
+        // 1) Use the page URL for filtering (blob: URLs will break URL())
+        let host;
+        try {
+            host = new URL(msg.url).hostname;
+        } catch {
+            console.warn('Invalid page URL for VIDEO_PLAY:', msg.url);
+            host = null;
+        }
+        if (host && skipDomains.some(d => host === d || host.endsWith(`.${d}`))) {
+            console.log('Skipped video_play on domain:', host);
+            return;
+        }
 
-    // ─── get device_name from storage ────────────────────────────────────────────
-    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+        // 2) Optionally enrich with tab info
+        let tabInfo = {};
+        try {
+            if (sender.tab?.id) {
+                const t = await chrome.tabs.get(sender.tab.id);
+                tabInfo = {
+                    tab_id: t.id,
+                    window_id: t.windowId,
+                    incognito: t.incognito,
+                    pinned: t.pinned,
+                    audible: t.audible,
+                    muted: t.mutedInfo?.muted ?? false,
+                    opener_tab_id: t.openerTabId ?? null
+                };
+            }
+        } catch (e) {
+            console.warn('Could not fetch tab info for VIDEO_PLAY', e);
+        }
 
-    // Insert into Supabase alongside your page‐view data
-    const { error } = await supabase
-        .from('browserplugin')
-        .insert({
-            url: msg.videoUrl,
-            visited_at: msg.timestamp,
-            title: msg.pageTitle,
+        // 3) Build the complete record matching your schema
+        const record = {
+            url: msg.url,
+            visited_at: msg.visited_at,
+            title: msg.title,
+            favicon_url: msg.favicon_url,
             hostname: host,
             transition_type: 'video_play',
-            referrer: msg.pageUrl,
-            // …any other fields you like…
-            device_name,
-        });
+            device_name: msg.device_name,
+            user_id: msg.user_id,
+            referred_by: msg.referred_by,
+            event_type: msg.event_type,
+            content: msg.content,   // { videoUrl: 'blob:…' }
+            ...tabInfo
+        };
 
-    if (error) console.error('Error logging video play:', error);
-    else console.log('Logged video play:', msg.videoUrl);
+        // 4) Insert into Supabase
+        const { error } = await supabase.from('browserplugin').insert(record);
+        if (error) {
+            console.error('[VIDEO_PLAY] Supabase insert error:', error);
+        } else {
+            console.log('[VIDEO_PLAY] Event logged:', record);
+        }
+
+        return; // done handling VIDEO_PLAY
+    }
 });

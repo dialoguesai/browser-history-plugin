@@ -1,56 +1,91 @@
+// content.js
 console.log('[CONTENT] Content script injected and running');
-// Capture any HTML5 <video> play event and notify background
-document.addEventListener('play', event => {
-    const video = event.target;
-    if (video.tagName === 'VIDEO' && video.currentSrc) {
-        chrome.runtime.sendMessage({
-            type: 'VIDEO_PLAY',
-            videoUrl: video.currentSrc,
-            pageUrl: location.href,
-            pageTitle: document.title,
-            timestamp: new Date().toISOString()
-        });
+
+/**
+ * Read user prefs from storage
+ */
+function getPrefs() {
+    return new Promise(resolve => {
+        chrome.storage.sync.get(
+            {
+                device_name: '',
+                user_id: null,
+                referred_by: document.referrer || null
+            },
+            prefs => resolve(prefs)
+        );
+    });
+}
+
+/**
+ * Collects the fields content scripts can see
+ */
+function getPageMeta() {
+    return {
+        url: location.href,
+        visited_at: new Date().toISOString(),
+        title: document.title,
+        favicon_url: (document.querySelector("link[rel~='icon']") || {}).href || null,
+        hostname: location.hostname
+    };
+}
+
+/**
+ * Sends a rich message with whatever metadata we can gather here.
+ * Background.js will supplement tab_id, window_id, incognito, etc.
+ */
+async function sendRichMessage(eventType, transitionType, contentObj = {}, extras = {}) {
+    const prefs = await getPrefs();
+    const meta = getPageMeta();
+
+    chrome.runtime.sendMessage({
+        event_type: eventType,
+        type: eventType,       // so your listener can still use msg.type
+        transition_type: transitionType,
+        ...meta,
+        ...prefs,
+        ...extras,
+        content: contentObj
+    });
+}
+
+
+/**
+ * 1) VIDEO_PLAY event
+ */
+document.addEventListener('play', e => {
+    const v = e.target;
+    if (v.tagName === 'VIDEO' && v.currentSrc) {
+        sendRichMessage('VIDEO_PLAY', 'video_play', { videoUrl: v.currentSrc });
     }
 }, true);
-// Inject a floating star button for starring the current page
-(function () {
+
+
+/**
+ * 2) STAR_PAGE (⭐ button)
+ */
+(function injectStarButton() {
     if (window.__starButtonInjected) return;
     window.__starButtonInjected = true;
 
     const btn = document.createElement('button');
     btn.innerText = '⭐ Star';
-    btn.id = '__star_website_button';
-    btn.style.position = 'fixed';
-    btn.style.bottom = '24px';
-    btn.style.right = '24px';
-    btn.style.zIndex = 99999;
-    btn.style.padding = '10px 18px';
-    btn.style.background = '#fffbe6';
-    btn.style.border = '1px solid #ffd700';
-    btn.style.borderRadius = '24px';
-    btn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)';
-    btn.style.fontSize = '18px';
-    btn.style.cursor = 'pointer';
+    Object.assign(btn.style, {
+        position: 'fixed',
+        bottom: '24px',
+        right: '24px',
+        zIndex: 99999,
+        padding: '10px 18px',
+        background: '#fffbe6',
+        border: '1px solid #ffd700',
+        borderRadius: '24px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+        fontSize: '18px',
+        cursor: 'pointer'
+    });
 
     btn.addEventListener('click', () => {
-        console.log("Sending runtime message")
-        chrome.runtime.sendMessage({
-            type: 'STAR_PAGE',
-            url: location.href,
-            title: document.title,
-            favicon_url: (document.querySelector("link[rel~='icon']") || {}).href || '',
-            device_name: '', // Optionally fill from storage if needed
-            tab_id: null,
-            window_id: null,
-            incognito: null,
-            transition_type: null,
-            hostname: location.hostname,
-            pinned: null,
-            audible: null,
-            muted: null,
-            opener_tab_id: null
-        });
-        console.log("Sent message...")
+        sendRichMessage('STAR_PAGE', 'star_page');
         btn.innerText = '⭐ Starred!';
         btn.disabled = true;
         setTimeout(() => {
@@ -60,4 +95,76 @@ document.addEventListener('play', event => {
     });
 
     document.body.appendChild(btn);
+})();
+
+/**
+ * 3) Click Tracking
+ */
+(function clickTracker() {
+    const DEBOUNCE = 500, LIMIT = 100;
+    let lastTime = 0, count = 0;
+
+    function selector(el) {
+        if (!el) return '';
+        if (el.id) return `#${el.id}`;
+        if (typeof el.className === 'string' && el.className.trim()) {
+            return `${el.tagName.toLowerCase()}.${el.className.trim().replace(/\s+/g, '.')}`;
+        }
+        return el.tagName.toLowerCase();
+    }
+
+    async function onClick(e) {
+        const now = Date.now();
+        if (now - lastTime < DEBOUNCE) return;
+        if (count >= LIMIT) return;
+        lastTime = now; count++;
+
+        await sendRichMessage(
+            'click',
+            'click',
+            {
+                x: e.clientX,
+                y: e.clientY,
+                element: selector(e.target),
+                timestamp: new Date().toISOString()
+            }
+        );
+    }
+
+    document.addEventListener('click', onClick, true);
+})();
+
+/**
+ * 4) Highlight (Text Selection) Tracking
+ */
+(function highlightTracker() {
+    function anchorTag(sel) {
+        const node = sel.anchorNode;
+        const el = node?.nodeType === 1 ? node : node?.parentElement;
+        return el?.tagName.toLowerCase() || '';
+    }
+
+    async function onSelect() {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) return;
+        const txt = sel.toString().trim();
+        if (!txt) return;
+
+        await sendRichMessage(
+            'highlight',
+            'highlight',
+            {
+                selectedText: txt,
+                anchorNode: anchorTag(sel),
+                timestamp: new Date().toISOString()
+            }
+        );
+    }
+
+    document.addEventListener('mouseup', onSelect, false);
+    document.addEventListener('keyup', e => {
+        if (['Shift', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+            onSelect();
+        }
+    }, false);
 })();
