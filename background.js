@@ -364,3 +364,45 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         return; // done handling VIDEO_PLAY
     }
 });
+
+// Context menu: Star Site
+chrome.runtime.onInstalled.addListener(() => {
+    try {
+        chrome.contextMenus.create({
+            id: 'star-site',
+            title: 'Star Site',
+            contexts: ['page', 'action']
+        });
+    } catch (e) {
+        console.warn('Context menu creation failed (maybe already exists):', e);
+    }
+});
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+    if (info.menuItemId !== 'star-site') return;
+    if (!tab || !tab.id || !tab.url) return;
+
+    // Fill in message payload similar to content -> background flow
+    const url = tab.url;
+    let hostname;
+    try { hostname = new URL(url).hostname; } catch { hostname = null; }
+
+    const payload = {
+        type: 'STAR_PAGE',
+        url,
+        title: tab.title,
+        favicon_url: tab.favIconUrl,
+        tab_id: tab.id,
+        window_id: tab.windowId,
+        incognito: tab.incognito,
+        transition_type: 'context_menu',
+        hostname,
+        pinned: tab.pinned,
+        audible: tab.audible,
+        muted: tab.mutedInfo?.muted ?? false,
+        opener_tab_id: tab.openerTabId ?? null
+    };
+
+    // Reuse existing STAR_PAGE handler
+    chrome.runtime.sendMessage(payload);
+});

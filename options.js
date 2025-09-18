@@ -5,6 +5,7 @@ const urlInput = document.getElementById('supabaseUrl');
 const keyInput = document.getElementById('anonKey');
 const listInput = document.getElementById('skipList');
 const deviceNameInput = document.getElementById('deviceName');
+const showStarButtonInput = document.getElementById('showStarButton');
 const saveButton = document.getElementById('save');
 const statusText = document.getElementById('status');
 
@@ -14,12 +15,14 @@ document.addEventListener('DOMContentLoaded', () => {
         supabaseUrl: '',
         anonKey: '',
         skipDomains: [],
-        device_name: ''
+        device_name: '',
+        showStarButton: true
     }, (items) => {
         urlInput.value = items.supabaseUrl;
         keyInput.value = items.anonKey;
         listInput.value = items.skipDomains.join('\n');
         deviceNameInput.value = items.device_name || '';
+        showStarButtonInput.checked = items.showStarButton !== false;
     });
 });
 
@@ -32,8 +35,9 @@ saveButton.addEventListener('click', () => {
         .map(s => s.trim())
         .filter(s => s.length);
     const device_name = deviceNameInput.value.trim();
+    const showStarButton = !!showStarButtonInput.checked;
 
-    chrome.storage.sync.set({ supabaseUrl, anonKey, skipDomains, device_name }, () => {
+    chrome.storage.sync.set({ supabaseUrl, anonKey, skipDomains, device_name, showStarButton }, () => {
         statusText.style.visibility = 'visible';
         setTimeout(() => statusText.style.visibility = 'hidden', 1500);
     });

@@ -64,11 +64,14 @@ document.addEventListener('play', e => {
 /**
  * 2) STAR_PAGE (⭐ button)
  */
-(function injectStarButton() {
+async function maybeInjectStarButton() {
     if (window.__starButtonInjected) return;
+    const { showStarButton = true } = await chrome.storage.sync.get({ showStarButton: true });
+    if (!showStarButton) return;
     window.__starButtonInjected = true;
 
     const btn = document.createElement('button');
+    btn.setAttribute('data-star-button', '1');
     btn.innerText = '⭐ Star';
     Object.assign(btn.style, {
         position: 'fixed',
@@ -95,7 +98,21 @@ document.addEventListener('play', e => {
     });
 
     document.body.appendChild(btn);
-})();
+}
+
+// Initial check and also listen for runtime config changes
+maybeInjectStarButton();
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, 'showStarButton')) {
+        if (changes.showStarButton.newValue === false) {
+            const btn = document.querySelector('button[data-star-button]');
+            if (btn) btn.remove();
+            window.__starButtonInjected = false;
+        } else {
+            maybeInjectStarButton();
+        }
+    }
+});
 
 /**
  * 3) Click Tracking
