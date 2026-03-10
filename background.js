@@ -39,12 +39,160 @@ function initFromStorage() {
     });
 }
 
+/** Show or hide the "connection expired" (red) badge. Only for 401/403 — user must re-attach. */
+async function setDialoguesErrorBadge(show) {
+    try {
+        if (show) {
+            await chrome.storage.sync.set({ dialoguesConnectionExpired: true });
+        } else {
+            await chrome.storage.sync.remove(['dialoguesConnectionExpired']);
+        }
+        await refreshDialoguesBadge();
+    } catch (e) {
+        console.warn('setDialoguesErrorBadge:', e);
+    }
+}
+
+/** Show or hide the "engine unavailable" (yellow) warning badge. Does not clear token; no re-attach needed. */
+async function setDialoguesEngineWarningBadge(show) {
+    try {
+        if (show) {
+            await chrome.storage.sync.set({ dialoguesEngineWarning: true });
+        } else {
+            await chrome.storage.sync.remove(['dialoguesEngineWarning']);
+        }
+        await refreshDialoguesBadge();
+    } catch (e) {
+        console.warn('setDialoguesEngineWarningBadge:', e);
+    }
+}
+
+/** Apply badge from storage: red = connection expired (re-attach), yellow = engine unavailable (no re-attach). */
+async function refreshDialoguesBadge() {
+    try {
+        if (typeof chrome.action === 'undefined') return;
+        const { dialoguesConnectionExpired, dialoguesEngineWarning } = await chrome.storage.sync.get({
+            dialoguesConnectionExpired: false,
+            dialoguesEngineWarning: false
+        });
+        if (dialoguesConnectionExpired) {
+            await chrome.action.setBadgeText({ text: '!' });
+            await chrome.action.setBadgeBackgroundColor({ color: '#c00' });
+        } else if (dialoguesEngineWarning) {
+            await chrome.action.setBadgeText({ text: '!' });
+            await chrome.action.setBadgeBackgroundColor({ color: '#da0' });
+        } else {
+            await chrome.action.setBadgeText({ text: '' });
+            await chrome.action.setBadgeBackgroundColor({ color: [0, 0, 0, 0] });
+        }
+    } catch (e) {
+        console.warn('refreshDialoguesBadge:', e);
+    }
+}
+
+/** On load: apply stored badge state (red = re-attach, yellow = engine warning). */
+async function applyStoredErrorBadge() {
+    await refreshDialoguesBadge();
+}
+
 // run once on load
 initFromStorage();
+applyStoredErrorBadge();
 // re‑run whenever options change
 chrome.storage.onChanged.addListener(initFromStorage);
+// When connection-expired or engine-warning is cleared, refresh badge.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'sync') return;
+    const expiredCleared = 'dialoguesConnectionExpired' in changes && changes.dialoguesConnectionExpired.newValue === undefined;
+    const engineWarningCleared = 'dialoguesEngineWarning' in changes && changes.dialoguesEngineWarning.newValue === undefined;
+    if (expiredCleared || engineWarningCleared) {
+        refreshDialoguesBadge().catch(() => {});
+    }
+});
+
+/** When Attach Dialogues is active, send records to Control Plane app_ingest. Handles 401/403 (clears token). */
+async function sendToControlPlaneAppIngest(sourceId, records) {
+    const { dialoguesToken, dialoguesResourceId, dialoguesControlPlaneUrl } = await chrome.storage.sync.get({
+        dialoguesToken: '',
+        dialoguesResourceId: '',
+        dialoguesControlPlaneUrl: ''
+    });
+    if (!dialoguesToken || !dialoguesResourceId || !dialoguesControlPlaneUrl) return;
+    const controlPlaneUrl = dialoguesControlPlaneUrl.replace(/\/$/, '');
+    const appIngestUrl = `${controlPlaneUrl}/v1/ingestion/app_ingest`;
+    try {
+        const response = await fetch(appIngestUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${dialoguesToken}`
+            },
+            body: JSON.stringify({
+                resource_id: dialoguesResourceId,
+                source_id: sourceId,
+                records
+            })
+        });
+        if (response.status === 401 || response.status === 403) {
+            const errorBody = await response.text();
+            console.warn('[APP_INGEST] Token rejected:', response.status, '— Server says:', errorBody || '(no body)');
+            await setDialoguesErrorBadge(true);
+            await chrome.storage.sync.remove(['dialoguesToken', 'dialoguesResourceId']);
+            chrome.notifications?.create({
+                type: 'basic',
+                iconUrl: 'icons/icon-48.png',
+                title: 'Dialogues Connection Expired',
+                message: 'Please re-attach Dialogues in the extension options.'
+            });
+        } else if (response.status === 502 || response.status === 503) {
+            console.warn('[APP_INGEST] Engine unavailable:', response.status, await response.text());
+            await setDialoguesEngineWarningBadge(true);
+        } else if (!response.ok) {
+            console.error('[APP_INGEST] Failed to send', sourceId, ':', response.status, await response.text());
+            await setDialoguesEngineWarningBadge(true);
+        } else {
+            console.log('[APP_INGEST] Successfully sent', sourceId, 'to Control Plane');
+            await setDialoguesEngineWarningBadge(false);
+        }
+    } catch (err) {
+        console.error('[APP_INGEST] Error sending', sourceId, 'to Control Plane:', err);
+        await setDialoguesEngineWarningBadge(true);
+    }
+}
+
+// Intercept redirects to options.html and extract hash parameters before page loads
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url && tab.url && tab.url.includes('options.html')) {
+        const hashMatch = tab.url.match(/#(.+)$/);
+        if (hashMatch && hashMatch[1]) {
+            console.log('[BACKGROUND] Intercepted options.html redirect with hash:', hashMatch[1].substring(0, 50) + '...');
+            const params = new URLSearchParams(hashMatch[1]);
+            const access_token = params.get('access_token');
+            const resource_id = params.get('resource_id');
+            if (access_token && resource_id) {
+                console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
+                // Preserve dialoguesControlPlaneUrl (set when user clicked Attach Dialogues)
+                chrome.storage.sync.get(['dialoguesUrl', 'dialoguesControlPlaneUrl'], async (base) => {
+                    const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+                    const toSet = {
+                        dialoguesToken: access_token,
+                        dialoguesResourceId: resource_id,
+                        _redirectHashProcessed: true
+                    };
+                    if (controlPlaneUrl) toSet.dialoguesControlPlaneUrl = controlPlaneUrl;
+                    await setDialoguesErrorBadge(false);
+                    await setDialoguesEngineWarningBadge(false);
+                    chrome.storage.sync.set(toSet, () => {
+                        console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect; control plane URL:', controlPlaneUrl || '(not set – set Dialogues URL in Options and re-attach)');
+                    });
+                });
+            }
+        }
+    }
+});
 
 chrome.webNavigation.onCompleted.addListener(async (details) => {
+    // Only main frame (top-level page load). If you never see [NAV] logs, open a NEW tab and go to a different site (e.g. google.com). SPAs like Supabase dashboard don't trigger new navigations when you click around.
     if (details.frameId !== 0) return;
     const url = details.url;
     if (url === 'about:blank') return;
@@ -54,14 +202,12 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     catch { return; }
 
     if (skipDomains.some(d => hostname === d || hostname.endsWith(`.${d}`))) {
-        console.log(`Skipped domain: ${hostname}`);
+        console.log(`[NAV] Skipped domain: ${hostname}`);
         return;
     }
 
-    if (!supabase) {
-        console.warn('Supabase not configured; skipping insert.');
-        return;
-    }
+    // Log every top-level navigation (full page load). SPA route changes do NOT trigger this.
+    console.log('[NAV] Page loaded:', url.substring(0, 60) + (url.length > 60 ? '...' : ''));
 
     // ─── fetch tab info ──────────────────────────────────────────────────────────
     let tab;
@@ -98,16 +244,79 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
         referred_by: null
     };
 
-    // ─── insert into Supabase ──────────────────────────────────────────────────
-    try {
-        const { error } = await supabase
-            .from('browserplugin')
-            .insert(record);
+    // ─── Sprint 3: Check if "Attach Dialogues" is active ────────────────────────
+    const { dialoguesToken, dialoguesResourceId, dialoguesControlPlaneUrl } = await chrome.storage.sync.get({
+        dialoguesToken: '',
+        dialoguesResourceId: '',
+        dialoguesControlPlaneUrl: ''
+    });
 
-        if (error) console.error('Supabase insert error:', error);
-        else console.log('Logged visit:', record);
-    } catch (err) {
-        console.error('Unexpected error logging visit', err);
+    if (dialoguesToken && dialoguesResourceId && dialoguesControlPlaneUrl) {
+        // "Attach Dialogues" is active - send to Control Plane app_ingest
+        const controlPlaneUrl = dialoguesControlPlaneUrl.replace(/\/$/, '');
+        const appIngestUrl = `${controlPlaneUrl}/v1/ingestion/app_ingest`;
+        console.log('[APP_INGEST] Sending to Control Plane:', appIngestUrl);
+        try {
+            const response = await fetch(appIngestUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${dialoguesToken}`
+                },
+                body: JSON.stringify({
+                    resource_id: dialoguesResourceId,
+                    source_id: 'browser_visits',
+                    records: [record]
+                })
+            });
+
+            if (response.status === 401 || response.status === 403) {
+                const errorBody = await response.text();
+                console.warn('[APP_INGEST] Token rejected:', response.status, '— Server says:', errorBody || '(no body)');
+                await setDialoguesErrorBadge(true);
+                await chrome.storage.sync.remove(['dialoguesToken', 'dialoguesResourceId']);
+                chrome.notifications?.create({
+                    type: 'basic',
+                    iconUrl: 'icons/icon-48.png',
+                    title: 'Dialogues Connection Expired',
+                    message: 'Please re-attach Dialogues in the extension options.'
+                });
+            } else if (response.status === 502 || response.status === 503 || !response.ok) {
+                const errorText = await response.text();
+                console.warn('[APP_INGEST] Engine unavailable:', response.status, errorText || '(no body)');
+                await setDialoguesEngineWarningBadge(true);
+            } else {
+                console.log('[APP_INGEST] Successfully sent visit to Control Plane');
+                await setDialoguesEngineWarningBadge(false);
+            }
+        } catch (err) {
+            console.error('[APP_INGEST] Error sending visit to Control Plane:', err);
+            await setDialoguesEngineWarningBadge(true);
+        }
+    } else {
+        // So you can see why no request is sent (check Service Worker console)
+        if (!dialoguesToken) console.log('[APP_INGEST] Not sending: no dialoguesToken (Attach Dialogues not done or cleared)');
+        else if (!dialoguesResourceId) console.log('[APP_INGEST] Not sending: no dialoguesResourceId');
+        else if (!dialoguesControlPlaneUrl) console.log('[APP_INGEST] Not sending: no dialoguesControlPlaneUrl');
+    }
+
+    // ─── Also insert into Supabase if configured (for backward compatibility) ───
+    if (supabase) {
+        try {
+            const { error } = await supabase
+                .from('browserplugin')
+                .insert(record);
+
+            if (error) console.error('Supabase insert error:', error);
+            else console.log('Logged visit to Supabase:', record);
+        } catch (err) {
+            console.error('Unexpected error logging visit to Supabase', err);
+        }
+    } else if (!dialoguesToken) {
+        console.warn(
+            '[APP_INGEST] Neither Supabase nor Dialogues configured; skipping insert. ' +
+            'To use Dialogues: open extension Options → set "Dialogues URL" (e.g. https://cp.logu3s.com) → click "Attach Dialogues" and complete the consent flow.'
+        );
     }
 });
 
@@ -129,7 +338,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         // Get device_name from storage
         const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
 
-        // Build your record
+        // Build your record (tab switch = revisit, so we send as browser_visits with transition_type tab_activated)
         const record = {
             url: tab.url,
             visited_at: new Date().toISOString(),
@@ -148,7 +357,10 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
             referred_by: null
         };
 
-        // Insert into Supabase
+        // When Attach Dialogues is active, send tab switch as a visit (so "going back to a tab" counts)
+        await sendToControlPlaneAppIngest('browser_visits', [record]);
+
+        // Insert into Supabase if configured
         if (supabase) {
             const { error } = await supabase.from('browserplugin').insert(record);
             if (error) console.error('Supabase insert error (tab activated):', error);
@@ -166,32 +378,15 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
     if (msg.type === 'STAR_PAGE') {
         console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
 
-        if (!supabase) {
-            console.warn('[STAR_PAGE] Supabase not configured; skipping star log.');
-            chrome.notifications?.create({
-                type: 'basic',
-                iconUrl: 'icons/icon-48.png',
-                title: 'Star Website',
-                message: 'Supabase not configured. Check your settings.'
-            });
-            return;
-        }
-
-        // Log Supabase client state
-        try {
-            console.log('[STAR_PAGE] Supabase client:', supabase);
-        } catch (e) {
-            console.warn('[STAR_PAGE] Could not log Supabase client:', e);
-        }
-
         // ─── get device_name from storage ────────────────────────────────────────────
         const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
         console.log('[STAR_PAGE] device_name from storage:', device_name);
 
-        // Build record for starred_websites table
+        // Build record for starred_websites table and/or Control Plane browser_events
         const record = {
             url: msg.url,
             starred_at: new Date().toISOString(),
+            visited_at: new Date().toISOString(),
             device_name,
             title: msg.title,
             favicon_url: msg.favicon_url,
@@ -204,53 +399,60 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
             audible: msg.audible,
             muted: msg.muted,
             opener_tab_id: msg.opener_tab_id,
-            referred_by: null
+            referred_by: null,
+            event_type: 'star_page'
         };
         console.log('[STAR_PAGE] Record to insert:', record);
 
-        try {
-            const result = await supabase
-                .from('starred_websites')
-                .insert(record);
+        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
+        await sendToControlPlaneAppIngest('browser_events', [record]);
 
-            console.log('[STAR_PAGE] Supabase insert result:', result);
-
-            if (result.error) {
-                console.error('[STAR_PAGE] Supabase star insert error:', result.error);
+        if (supabase) {
+            try {
+                const result = await supabase.from('starred_websites').insert(record);
+                console.log('[STAR_PAGE] Supabase insert result:', result);
+                if (result.error) {
+                    console.error('[STAR_PAGE] Supabase star insert error:', result.error);
+                    chrome.notifications?.create({
+                        type: 'basic',
+                        iconUrl: 'icons/icon-48.png',
+                        title: 'Star Website',
+                        message: 'Failed to star website: ' + (result.error.message || 'Unknown error')
+                    });
+                } else {
+                    console.log('[STAR_PAGE] Starred website successfully:', record);
+                    chrome.notifications?.create({
+                        type: 'basic',
+                        iconUrl: 'icons/icon-48.png',
+                        title: 'Star Website',
+                        message: 'Website starred successfully!'
+                    });
+                }
+            } catch (err) {
+                console.error('[STAR_PAGE] Unexpected error starring website', err);
                 chrome.notifications?.create({
                     type: 'basic',
                     iconUrl: 'icons/icon-48.png',
                     title: 'Star Website',
-                    message: 'Failed to star website: ' + (result.error.message || 'Unknown error')
-                });
-            } else {
-                console.log('[STAR_PAGE] Starred website successfully:', record);
-                chrome.notifications?.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon-48.png',
-                    title: 'Star Website',
-                    message: 'Website starred successfully!'
+                    message: 'Unexpected error: ' + (err.message || 'Unknown error')
                 });
             }
-        } catch (err) {
-            console.error('[STAR_PAGE] Unexpected error starring website', err);
-            chrome.notifications?.create({
-                type: 'basic',
-                iconUrl: 'icons/icon-48.png',
-                title: 'Star Website',
-                message: 'Unexpected error: ' + (err.message || 'Unknown error')
-            });
+        } else {
+            const { dialoguesToken } = await chrome.storage.sync.get({ dialoguesToken: '' });
+            if (!dialoguesToken) {
+                chrome.notifications?.create({
+                    type: 'basic',
+                    iconUrl: 'icons/icon-48.png',
+                    title: 'Star Website',
+                    message: 'Supabase not configured. Use Attach Dialogues in Options to save stars.'
+                });
+            }
         }
         return;
     }
 
     // Enhanced event tracking for "click" and "highlight" events
     if (msg.event_type === 'click' || msg.event_type === 'highlight') {
-        if (!supabase) {
-            console.warn(`[${msg.event_type}] Supabase not configured; skipping event log.`);
-            return;
-        }
-
         // Try to fill in tab details if we can
         let tabInfo = {};
         try {
@@ -286,18 +488,24 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
             ...tabInfo
         };
 
-        try {
-            const { error } = await supabase
-                .from('browserplugin')
-                .insert(record);
+        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
+        await sendToControlPlaneAppIngest('browser_events', [record]);
 
-            if (error) {
-                console.error(`[${msg.event_type}] Supabase insert error:`, error);
-            } else {
-                console.log(`[${msg.event_type}] Event logged:`, record);
+        // Legacy Supabase path: only if Supabase is configured (and Attach Dialogues may not be active)
+        if (supabase) {
+            try {
+                const { error } = await supabase
+                    .from('browserplugin')
+                    .insert(record);
+
+                if (error) {
+                    console.error(`[${msg.event_type}] Supabase insert error:`, error);
+                } else {
+                    console.log(`[${msg.event_type}] Event logged:`, record);
+                }
+            } catch (err) {
+                console.error(`[${msg.event_type}] Unexpected error logging event`, err);
             }
-        } catch (err) {
-            console.error(`[${msg.event_type}] Unexpected error logging event`, err);
         }
 
         return;
@@ -353,12 +561,13 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
             ...tabInfo
         };
 
-        // 4) Insert into Supabase
-        const { error } = await supabase.from('browserplugin').insert(record);
-        if (error) {
-            console.error('[VIDEO_PLAY] Supabase insert error:', error);
-        } else {
-            console.log('[VIDEO_PLAY] Event logged:', record);
+        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
+        await sendToControlPlaneAppIngest('browser_events', [record]);
+
+        if (supabase) {
+            const { error } = await supabase.from('browserplugin').insert(record);
+            if (error) console.error('[VIDEO_PLAY] Supabase insert error:', error);
+            else console.log('[VIDEO_PLAY] Event logged:', record);
         }
 
         return; // done handling VIDEO_PLAY

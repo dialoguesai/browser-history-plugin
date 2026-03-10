@@ -6,14 +6,33 @@ console.log('[CONTENT] Content script injected and running');
  */
 function getPrefs() {
     return new Promise(resolve => {
-        chrome.storage.sync.get(
-            {
+        try {
+            // Check if extension context is still valid
+            if (!chrome.runtime?.id) {
+                console.warn('[CONTENT] Extension context invalidated, using defaults');
+                resolve({
+                    device_name: '',
+                    user_id: null,
+                    referred_by: document.referrer || null
+                });
+                return;
+            }
+            chrome.storage.sync.get(
+                {
+                    device_name: '',
+                    user_id: null,
+                    referred_by: document.referrer || null
+                },
+                prefs => resolve(prefs)
+            );
+        } catch (err) {
+            console.warn('[CONTENT] Error reading storage (extension may have reloaded):', err);
+            resolve({
                 device_name: '',
                 user_id: null,
                 referred_by: document.referrer || null
-            },
-            prefs => resolve(prefs)
-        );
+            });
+        }
     });
 }
 
@@ -35,18 +54,32 @@ function getPageMeta() {
  * Background.js will supplement tab_id, window_id, incognito, etc.
  */
 async function sendRichMessage(eventType, transitionType, contentObj = {}, extras = {}) {
-    const prefs = await getPrefs();
-    const meta = getPageMeta();
+    try {
+        // Check if extension context is still valid
+        if (!chrome.runtime?.id) {
+            console.warn('[CONTENT] Extension context invalidated, skipping message send');
+            return;
+        }
+        const prefs = await getPrefs();
+        const meta = getPageMeta();
 
-    chrome.runtime.sendMessage({
-        event_type: eventType,
-        type: eventType,       // so your listener can still use msg.type
-        transition_type: transitionType,
-        ...meta,
-        ...prefs,
-        ...extras,
-        content: contentObj
-    });
+        chrome.runtime.sendMessage({
+            event_type: eventType,
+            type: eventType,       // so your listener can still use msg.type
+            transition_type: transitionType,
+            ...meta,
+            ...prefs,
+            ...extras,
+            content: contentObj
+        }, (response) => {
+            // Handle response or errors silently
+            if (chrome.runtime.lastError) {
+                console.warn('[CONTENT] Message send error:', chrome.runtime.lastError.message);
+            }
+        });
+    } catch (err) {
+        console.warn('[CONTENT] Error sending message (extension may have reloaded):', err);
+    }
 }
 
 
@@ -66,9 +99,19 @@ document.addEventListener('play', e => {
  */
 async function maybeInjectStarButton() {
     if (window.__starButtonInjected) return;
-    const { showStarButton = true } = await chrome.storage.sync.get({ showStarButton: true });
-    if (!showStarButton) return;
-    window.__starButtonInjected = true;
+    try {
+        // Check if extension context is still valid
+        if (!chrome.runtime?.id) {
+            console.warn('[CONTENT] Extension context invalidated, skipping star button');
+            return;
+        }
+        const { showStarButton = true } = await chrome.storage.sync.get({ showStarButton: true });
+        if (!showStarButton) return;
+        window.__starButtonInjected = true;
+    } catch (err) {
+        console.warn('[CONTENT] Error reading showStarButton (extension may have reloaded):', err);
+        return;
+    }
 
     const btn = document.createElement('button');
     btn.setAttribute('data-star-button', '1');
@@ -102,17 +145,23 @@ async function maybeInjectStarButton() {
 
 // Initial check and also listen for runtime config changes
 maybeInjectStarButton();
-chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, 'showStarButton')) {
-        if (changes.showStarButton.newValue === false) {
-            const btn = document.querySelector('button[data-star-button]');
-            if (btn) btn.remove();
-            window.__starButtonInjected = false;
-        } else {
-            maybeInjectStarButton();
-        }
+try {
+    if (chrome.runtime?.id) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, 'showStarButton')) {
+                if (changes.showStarButton.newValue === false) {
+                    const btn = document.querySelector('button[data-star-button]');
+                    if (btn) btn.remove();
+                    window.__starButtonInjected = false;
+                } else {
+                    maybeInjectStarButton();
+                }
+            }
+        });
     }
-});
+} catch (err) {
+    console.warn('[CONTENT] Error setting up storage listener:', err);
+}
 
 /**
  * 3) Click Tracking

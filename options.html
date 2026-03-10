@@ -59,6 +59,23 @@
 
     <button id="save">Save</button>
     <p id="status" style="color: green; visibility: hidden;">Saved!</p>
+
+    <h2>Attach Dialogues</h2>
+    <p style="font-size: 0.9em; color: #555;">Connect this plugin to your Dialogues account to also write visits to your Dialogues database (in addition to your own storage above).</p>
+    <label>
+        Dialogues URL (frontend + Control Plane base):
+        <input id="dialoguesUrl" type="text" placeholder="https://cp.logu3s.com" />
+    </label>
+    <div style="margin-top: 0.5rem;">
+        <button id="attachDialogues">Attach Dialogues</button>
+        <button id="detachDialogues" style="margin-left: 0.5rem; display: none;">Detach</button>
+        <span id="attachStatus" style="margin-left: 0.5rem; font-size: 0.9em;"></span>
+    </div>
+    <div id="debugInfo" style="margin-top: 0.5rem; font-size: 0.8em; color: #666; font-family: monospace; word-break: break-all;"></div>
+    <div id="scriptStatus" style="margin-top: 0.5rem; padding: 0.5rem; background: #f0f0f0; border-radius: 4px; font-size: 0.85em;">
+        <strong>Script status:</strong> <span id="scriptStatusText">Loading...</span>
+    </div>
+
     <h2>Starred Websites</h2>
     <div id="starredWebsites"></div>
 
