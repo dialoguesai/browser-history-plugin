@@ -33,13 +33,16 @@ One-time registration is done via script: see repo `scripts/register_browser_plu
 
 **"Attach Dialogues"** enables the browser plugin to write browsing data directly to your Dialogues database via the Control Plane, without requiring direct Supabase credentials.
 
+The plugin uses the universal Grant Access flow via `GET /connect` + one-time code exchange at `POST /connect/exchange`.
+
 ### How It Works
 
-1. **User clicks "Attach Dialogues"** in the plugin Options page
-2. **Consent flow:** User is redirected to Control Plane consent page, logs in via Keycloak, and approves access
-3. **Plugin receives token:** Control Plane returns an RPT (Requesting Party Token) and resource_id to the plugin
-4. **Plugin stores credentials:** Token and resource_id are saved in `chrome.storage.sync`
-5. **Automatic data sync:** When "Attach Dialogues" is active, the plugin automatically sends browsing data to Control Plane via `POST /v1/ingestion/app_ingest`
+1. **User clicks Attach Dialogues (Grant Access)** in the plugin Options page.
+2. **Consent flow:** User is redirected to Control Plane `GET /connect` with `app_id`, `redirect_uri`, `source_id`, and `scopes`.
+3. **One-time code callback:** Control Plane redirects back to plugin options with `?code=...`.
+4. **Exchange:** Plugin calls `POST /connect/exchange` and receives token artifact + `resource_id`.
+5. **Plugin stores credentials:** Token and resource_id are saved in `chrome.storage.sync`.
+6. **Automatic data sync:** When attached, plugin sends browsing data to Control Plane via `POST /v1/ingestion/app_ingest`.
 
 ### Access Duration
 

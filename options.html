@@ -66,10 +66,20 @@
         Dialogues URL (frontend + Control Plane base):
         <input id="dialoguesUrl" type="text" placeholder="https://cp.logu3s.com" />
     </label>
-    <div style="margin-top: 0.5rem;">
-        <button id="attachDialogues">Attach Dialogues</button>
-        <button id="detachDialogues" style="margin-left: 0.5rem; display: none;">Detach</button>
-        <span id="attachStatus" style="margin-left: 0.5rem; font-size: 0.9em;"></span>
+    <div style="margin-top: 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem;">
+        <button id="attachDialogues" style="width: 220px; display: inline-flex; justify-content: center; align-items: center; gap: 0.4rem;">
+            <img
+                src="https://cp.logu3s.com/static/brand/dialogues_logo_icon.png"
+                alt=""
+                aria-hidden="true"
+                width="16"
+                height="16"
+                style="background: #fff; border-radius: 4px; padding: 2px; border: 1px solid #d1d5db;"
+            />
+            Attach Dialogues
+        </button>
+        <button id="detachDialogues" style="width: 220px; display: none;">Detach</button>
+        <span id="attachStatus" style="font-size: 0.9em;"></span>
     </div>
     <div id="debugInfo" style="margin-top: 0.5rem; font-size: 0.8em; color: #666; font-family: monospace; word-break: break-all;"></div>
     <div id="scriptStatus" style="margin-top: 0.5rem; padding: 0.5rem; background: #f0f0f0; border-radius: 4px; font-size: 0.85em;">

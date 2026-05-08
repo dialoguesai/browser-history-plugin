@@ -163,6 +163,75 @@ async function sendToControlPlaneAppIngest(sourceId, records) {
 // Intercept redirects to options.html and extract hash parameters before page loads
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.url && tab.url && tab.url.includes('options.html')) {
+        // New Grant Access flow: options.html?code=...&state=...
+        try {
+            const parsed = new URL(tab.url);
+            const code = (parsed.searchParams.get('code') || '').trim();
+            const state = (parsed.searchParams.get('state') || '').trim();
+            if (code) {
+                console.log('[BACKGROUND] Intercepted Grant Access code redirect');
+                chrome.storage.sync.get(
+                    ['dialoguesUrl', 'dialoguesControlPlaneUrl', '_grantPendingState'],
+                    async (base) => {
+                        try {
+                            const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+                            if (!controlPlaneUrl) {
+                                console.warn('[BACKGROUND] Missing Control Plane URL; cannot exchange grant code');
+                                return;
+                            }
+                            if (state && base._grantPendingState && state !== base._grantPendingState) {
+                                console.warn('[BACKGROUND] Grant state mismatch; attempting exchange anyway');
+                            }
+                            const exchangeResp = await fetch(`${controlPlaneUrl}/connect/exchange`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    code,
+                                    app_id: 'browser-plugin'
+                                })
+                            });
+                            const payload = await exchangeResp.json().catch(() => ({}));
+                            if (!exchangeResp.ok) {
+                                console.warn(
+                                    '[BACKGROUND] Grant exchange failed:',
+                                    exchangeResp.status,
+                                    payload?.error_description || payload?.error || '(no error body)'
+                                );
+                                return;
+                            }
+                            const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
+                            const resourceId = String(payload?.resource_id || '').trim();
+                            if (!runToken || !resourceId) {
+                                console.warn('[BACKGROUND] Grant exchange missing token/resource_id');
+                                return;
+                            }
+                            await setDialoguesErrorBadge(false);
+                            await setDialoguesEngineWarningBadge(false);
+                            chrome.storage.sync.set({
+                                dialoguesToken: runToken,
+                                dialoguesResourceId: resourceId,
+                                dialoguesControlPlaneUrl: controlPlaneUrl,
+                                _grantQueryProcessed: true
+                            }, () => {
+                                console.log('[BACKGROUND] ✓ Token/resource_id stored from Grant Access code exchange');
+                                chrome.storage.sync.remove(['_grantPendingState']);
+                                // Navigate to clean options URL to avoid client blockers on query callback URLs.
+                                chrome.tabs.update(tabId, { url: chrome.runtime.getURL('options.html') });
+                            });
+                        } catch (err) {
+                            console.warn('[BACKGROUND] Grant redirect exchange error:', err);
+                        }
+                    }
+                );
+                return;
+            }
+        } catch (e) {
+            console.warn('[BACKGROUND] Failed to parse options redirect URL:', e);
+        }
+
         const hashMatch = tab.url.match(/#(.+)$/);
         if (hashMatch && hashMatch[1]) {
             console.log('[BACKGROUND] Intercepted options.html redirect with hash:', hashMatch[1].substring(0, 50) + '...');

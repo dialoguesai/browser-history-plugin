@@ -22,8 +22,13 @@ const attachDialoguesBtn = document.getElementById('attachDialogues');
 const detachDialoguesBtn = document.getElementById('detachDialogues');
 const attachStatusSpan = document.getElementById('attachStatus');
 
-// Control Plane base URL (hosts connect-app: Keycloak auth + consent + UMA exchange)
+// Control Plane base URL (hosts connect-app: Keycloak auth + consent + UMA exchange).
+// Connect-app grants MVP scopes activity:read + activity:write (→ Keycloak read/write) so the RPT can POST /v1/ingestion/app_ingest.
 const DEFAULT_DIALOGUES_URL = 'https://cp.logu3s.com';
+const DIALOGUES_CONNECT_APP_ID = 'browser-plugin';
+const DIALOGUES_GRANT_SOURCE_ID = 'browser_visits';
+const DIALOGUES_GRANT_SCOPES = 'activity:read,activity:write';
+let grantQueryHandled = false;
 
 function updateAttachUI(items) {
     const hasToken = !!(items.dialoguesToken && items.dialoguesResourceId);
@@ -37,6 +42,12 @@ function updateAttachUI(items) {
             ? `✓ Token: ${items.dialoguesToken.substring(0, 30)}...\n✓ Resource: ${items.dialoguesResourceId}`
             : 'No token/resource_id stored';
     }
+}
+
+function setAttachStatus(message, color = '') {
+    if (!attachStatusSpan) return;
+    attachStatusSpan.textContent = message || '';
+    attachStatusSpan.style.color = color || '';
 }
 
 // On load: parse hash from redirect (connect-app returns here with #access_token=...&resource_id=...)
@@ -71,6 +82,20 @@ function parseRedirectHash() {
             _closeApprovalTabIfNeeded();
             return;
         }
+        chrome.storage.sync.get(['dialoguesToken', 'dialoguesResourceId', '_grantQueryProcessed'], (grantResult) => {
+            if (grantResult._grantQueryProcessed && grantResult.dialoguesToken && grantResult.dialoguesResourceId) {
+                console.log('[OPTIONS] ✓ Found token/resource_id in storage (from Grant Access code exchange)');
+                chrome.storage.sync.remove('_grantQueryProcessed');
+                updateAttachUI({ dialoguesToken: grantResult.dialoguesToken, dialoguesResourceId: grantResult.dialoguesResourceId });
+                const statusEl = document.getElementById('attachStatus');
+                if (statusEl) {
+                    statusEl.textContent = '✓ Attached successfully!';
+                    statusEl.style.color = 'green';
+                }
+                _closeApprovalTabIfNeeded();
+                return;
+            }
+        });
         
         // Try to extract hash from URL (check both window.location.hash and URL string)
         let hashToParse = hash;
@@ -109,6 +134,55 @@ function parseRedirectHash() {
             console.warn('[OPTIONS] Missing access_token or resource_id in hash');
         }
     });
+}
+
+async function parseGrantRedirectQuery() {
+    if (grantQueryHandled) return;
+    const qs = new URLSearchParams(window.location.search);
+    const code = (qs.get('code') || '').trim();
+    const error = (qs.get('error') || '').trim();
+    const stateFromUrl = (qs.get('state') || '').trim();
+    if (!code && !error) return;
+    grantQueryHandled = true;
+    console.log('[OPTIONS] Grant Access redirect detected in query:', window.location.search);
+    if (error) {
+        console.error('[OPTIONS] Grant Access error:', error);
+        setAttachStatus(`Grant Access error: ${error}`, 'red');
+        return;
+    }
+    try {
+        const { dialoguesUrl, dialoguesControlPlaneUrl, _grantPendingState } = await chrome.storage.sync.get({
+            dialoguesUrl: DEFAULT_DIALOGUES_URL,
+            dialoguesControlPlaneUrl: '',
+            _grantPendingState: ''
+        });
+        if (stateFromUrl && _grantPendingState && stateFromUrl !== _grantPendingState) {
+            console.warn('[OPTIONS] Grant state mismatch; continuing exchange to avoid user lockout');
+        }
+        const base = (dialoguesControlPlaneUrl || dialoguesUrl || DEFAULT_DIALOGUES_URL).replace(/\/$/, '');
+        const exchangeResp = await fetch(`${base}/connect/exchange`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ code, app_id: DIALOGUES_CONNECT_APP_ID })
+        });
+        const payload = await exchangeResp.json().catch(() => ({}));
+        if (!exchangeResp.ok) {
+            const err = payload?.error_description || payload?.error || `exchange_failed (${exchangeResp.status})`;
+            throw new Error(err);
+        }
+        const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
+        const resourceId = String(payload?.resource_id || '').trim();
+        if (!runToken || !resourceId) {
+            throw new Error('Grant exchange did not return token/resource_id');
+        }
+        _saveTokenAndResourceId(runToken, resourceId);
+        await chrome.storage.sync.remove(['_grantPendingState']);
+        const cleanUrl = window.location.pathname + window.location.hash;
+        window.history.replaceState(null, '', cleanUrl);
+    } catch (e) {
+        console.error('[OPTIONS] Grant exchange failed:', e);
+        setAttachStatus(`Grant exchange failed: ${e?.message || e}`, 'red');
+    }
 }
 
 // Helper function to close the approval tab if it exists
@@ -169,6 +243,7 @@ if (document.readyState === 'loading') {
     // DOM already ready, parse hash now
     console.log('[OPTIONS] DOM already ready, parsing hash now');
     parseRedirectHash();
+    void parseGrantRedirectQuery();
 }
 
 // Check hash multiple times (Chrome extension redirects can be tricky)
@@ -218,6 +293,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
             parseRedirectHash();
         }, 50);
     }
+    if (areaName === 'sync' && changes._grantQueryProcessed && changes._grantQueryProcessed.newValue === true) {
+        console.log('[OPTIONS] ⚡ Storage changed: background.js stored grant exchange token!');
+        setTimeout(() => {
+            parseRedirectHash();
+        }, 50);
+    }
 });
 
 // load saved settings on open
@@ -226,6 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusEl = document.getElementById('scriptStatusText');
     if (statusEl) statusEl.textContent = 'DOM ready ✓';
     parseRedirectHash();
+    void parseGrantRedirectQuery();
     chrome.storage.sync.get({
         supabaseUrl: '',
         anonKey: '',
@@ -255,26 +337,28 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Attach Dialogues: open consent page
-attachDialoguesBtn.addEventListener('click', () => {
+// Attach Dialogues via universal Grant Access flow: /connect -> /connect/exchange
+attachDialoguesBtn.addEventListener('click', async () => {
     const base = (dialoguesUrlInput.value || DEFAULT_DIALOGUES_URL).replace(/\/$/, '');
-    chrome.storage.sync.set({ dialoguesUrl: base, dialoguesControlPlaneUrl: base });
     const redirectUri = chrome.runtime.getURL('options.html');
-    const url = `${base}/connect-app?app_id=browser-plugin&redirect_uri=${encodeURIComponent(redirectUri)}`;
-    console.log('[OPTIONS] Opening connect-app:', url);
-    console.log('[OPTIONS] Redirect URI will be:', redirectUri);
+    const pendingState = `grant-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const params = new URLSearchParams({
+        app_id: DIALOGUES_CONNECT_APP_ID,
+        redirect_uri: redirectUri,
+        source_id: DIALOGUES_GRANT_SOURCE_ID,
+        scopes: DIALOGUES_GRANT_SCOPES,
+        state: pendingState,
+        force_login: '1'
+    });
+    const url = `${base}/connect?${params.toString()}`;
+    console.log('[OPTIONS] Opening Grant Access connect URL:', url);
+    await chrome.storage.sync.set({
+        dialoguesUrl: base,
+        dialoguesControlPlaneUrl: base,
+        _grantPendingState: pendingState
+    });
     chrome.tabs.create({ url }, (tab) => {
-        // Store tab ID in storage so we can close it after redirect (even if page reloads)
         chrome.storage.sync.set({ _approvalTabId: tab.id });
-        console.log('[OPTIONS] Opened tab ID:', tab.id);
-        // Listen for tab updates to detect redirect
-        chrome.tabs.onUpdated.addListener(function listener(tabId, changeInfo) {
-            if (tabId === tab.id && changeInfo.url && changeInfo.url.startsWith('chrome-extension://')) {
-                console.log('[OPTIONS] Tab redirected to:', changeInfo.url);
-                chrome.tabs.onUpdated.removeListener(listener);
-                // Tab will be closed after token is saved (see _closeApprovalTabIfNeeded)
-            }
-        });
     });
 });
 
