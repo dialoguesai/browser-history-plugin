@@ -35,12 +35,14 @@ One-time registration is done via script: see repo `scripts/register_browser_plu
 
 The plugin uses the universal Grant Access flow via `GET /connect` + one-time code exchange at `POST /connect/exchange`.
 
+> Client auth note: the app `browser-plugin` now uses `client_secret_required` mode. Set the app secret in Options as **Dialogues Client Secret** so the extension can include it during code exchange.
+
 ### How It Works
 
 1. **User clicks Attach Dialogues (Grant Access)** in the plugin Options page.
 2. **Consent flow:** User is redirected to Control Plane `GET /connect` with `app_id`, `redirect_uri`, `source_id`, and `scopes`.
 3. **One-time code callback:** Control Plane redirects back to plugin options with `?code=...`.
-4. **Exchange:** Plugin calls `POST /connect/exchange` and receives token artifact + `resource_id`.
+4. **Exchange:** Plugin calls `POST /connect/exchange` with `code`, `app_id`, and `client_secret`, then receives token artifact + `resource_id`.
 5. **Plugin stores credentials:** Token and resource_id are saved in `chrome.storage.sync`.
 6. **Automatic data sync:** When attached, plugin sends browsing data to Control Plane via `POST /v1/ingestion/app_ingest`.
 

@@ -171,10 +171,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             if (code) {
                 console.log('[BACKGROUND] Intercepted Grant Access code redirect');
                 chrome.storage.sync.get(
-                    ['dialoguesUrl', 'dialoguesControlPlaneUrl', '_grantPendingState'],
+                    ['dialoguesUrl', 'dialoguesControlPlaneUrl', 'dialoguesClientSecret', '_grantPendingState'],
                     async (base) => {
                         try {
                             const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+                            const dialoguesClientSecret = (base.dialoguesClientSecret || '').trim();
                             if (!controlPlaneUrl) {
                                 console.warn('[BACKGROUND] Missing Control Plane URL; cannot exchange grant code');
                                 return;
@@ -190,7 +191,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                                 },
                                 body: JSON.stringify({
                                     code,
-                                    app_id: 'browser-plugin'
+                                    app_id: 'browser-plugin',
+                                    ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret } : {})
                                 })
                             });
                             const payload = await exchangeResp.json().catch(() => ({}));

@@ -18,6 +18,7 @@ const showStarButtonInput = document.getElementById('showStarButton');
 const saveButton = document.getElementById('save');
 const statusText = document.getElementById('status');
 const dialoguesUrlInput = document.getElementById('dialoguesUrl');
+const dialoguesClientSecretInput = document.getElementById('dialoguesClientSecret');
 const attachDialoguesBtn = document.getElementById('attachDialogues');
 const detachDialoguesBtn = document.getElementById('detachDialogues');
 const attachStatusSpan = document.getElementById('attachStatus');
@@ -151,9 +152,10 @@ async function parseGrantRedirectQuery() {
         return;
     }
     try {
-        const { dialoguesUrl, dialoguesControlPlaneUrl, _grantPendingState } = await chrome.storage.sync.get({
+        const { dialoguesUrl, dialoguesControlPlaneUrl, dialoguesClientSecret, _grantPendingState } = await chrome.storage.sync.get({
             dialoguesUrl: DEFAULT_DIALOGUES_URL,
             dialoguesControlPlaneUrl: '',
+            dialoguesClientSecret: '',
             _grantPendingState: ''
         });
         if (stateFromUrl && _grantPendingState && stateFromUrl !== _grantPendingState) {
@@ -163,7 +165,11 @@ async function parseGrantRedirectQuery() {
         const exchangeResp = await fetch(`${base}/connect/exchange`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ code, app_id: DIALOGUES_CONNECT_APP_ID })
+            body: JSON.stringify({
+                code,
+                app_id: DIALOGUES_CONNECT_APP_ID,
+                ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret.trim() } : {})
+            })
         });
         const payload = await exchangeResp.json().catch(() => ({}));
         if (!exchangeResp.ok) {
@@ -315,6 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
         device_name: '',
         showStarButton: true,
         dialoguesUrl: DEFAULT_DIALOGUES_URL,
+        dialoguesClientSecret: '',
         dialoguesToken: '',
         dialoguesResourceId: '',
         dialoguesControlPlaneUrl: ''
@@ -325,6 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
         deviceNameInput.value = items.device_name || '';
         showStarButtonInput.checked = items.showStarButton !== false;
         dialoguesUrlInput.value = items.dialoguesUrl || DEFAULT_DIALOGUES_URL;
+        dialoguesClientSecretInput.value = items.dialoguesClientSecret || '';
         updateAttachUI(items);
         // Debug: show stored token/resource_id
         const debugEl = document.getElementById('debugInfo');
@@ -379,8 +387,10 @@ saveButton.addEventListener('click', () => {
         .filter(s => s.length);
     const device_name = deviceNameInput.value.trim();
     const showStarButton = !!showStarButtonInput.checked;
+    const dialoguesUrl = (dialoguesUrlInput.value || DEFAULT_DIALOGUES_URL).trim();
+    const dialoguesClientSecret = (dialoguesClientSecretInput.value || '').trim();
 
-    chrome.storage.sync.set({ supabaseUrl, anonKey, skipDomains, device_name, showStarButton }, () => {
+    chrome.storage.sync.set({ supabaseUrl, anonKey, skipDomains, device_name, showStarButton, dialoguesUrl, dialoguesClientSecret }, () => {
         statusText.style.visibility = 'visible';
         setTimeout(() => statusText.style.visibility = 'hidden', 1500);
     });
