@@ -17,6 +17,43 @@ let supabase = null;
 // this will end up containing defaultSkipDomains + whatever the user adds
 let skipDomains = [...defaultSkipDomains];
 
+/**
+ * Normalize a skip-list line to a hostname. Accepts bare hostnames, full URLs (any path),
+ * or host/path without a scheme so all routes on that host match.
+ */
+function normalizeSkipDomainEntry(raw) {
+    const s = String(raw ?? '').trim().toLowerCase();
+    if (!s) return null;
+    try {
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
+            return new URL(s).hostname.toLowerCase();
+        }
+        let hostPart = s.split('/')[0];
+        if (!hostPart) return null;
+        if (hostPart.startsWith('[')) {
+            const end = hostPart.indexOf(']');
+            return end === -1 ? null : hostPart.slice(1, end).toLowerCase();
+        }
+        if (hostPart.includes(':')) {
+            hostPart = hostPart.split(':')[0];
+        }
+        return hostPart || null;
+    } catch {
+        return null;
+    }
+}
+
+/** True if this page host is skipped (exact host or subdomain of a skip entry). */
+function shouldSkipHostname(hostname) {
+    const host = String(hostname || '').toLowerCase();
+    if (!host) return false;
+    return skipDomains.some((entry) => {
+        const pattern = normalizeSkipDomainEntry(entry);
+        if (!pattern) return false;
+        return host === pattern || host.endsWith('.' + pattern);
+    });
+}
+
 function initFromStorage() {
     chrome.storage.sync.get({
         supabaseUrl: '',
@@ -30,10 +67,16 @@ function initFromStorage() {
             supabase = null;
         }
 
-        // merge default + user domains
+        // merge default + user domains (dedupe by normalized hostname vs defaults)
+        const defaultNorm = new Set(
+            defaultSkipDomains.map(normalizeSkipDomainEntry).filter(Boolean)
+        );
         skipDomains = [
             ...defaultSkipDomains,
-            ...userDomains.filter(d => d && !defaultSkipDomains.includes(d))
+            ...userDomains.filter((d) => {
+                const h = normalizeSkipDomainEntry(d);
+                return h && !defaultNorm.has(h);
+            })
         ];
         console.log('Effective skip list:', skipDomains);
     });
@@ -272,7 +315,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     try { hostname = new URL(url).hostname; }
     catch { return; }
 
-    if (skipDomains.some(d => hostname === d || hostname.endsWith(`.${d}`))) {
+    if (shouldSkipHostname(hostname)) {
         console.log(`[NAV] Skipped domain: ${hostname}`);
         return;
     }
@@ -401,7 +444,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         let hostname;
         try { hostname = new URL(tab.url).hostname; }
         catch { return; }
-        if (skipDomains.some(d => hostname === d || hostname.endsWith(`.${d}`))) {
+        if (shouldSkipHostname(hostname)) {
             console.log(`Skipped domain on tab activation: ${hostname}`);
             return;
         }
@@ -592,7 +635,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
             console.warn('Invalid page URL for VIDEO_PLAY:', msg.url);
             host = null;
         }
-        if (host && skipDomains.some(d => host === d || host.endsWith(`.${d}`))) {
+        if (host && shouldSkipHostname(host)) {
             console.log('Skipped video_play on domain:', host);
             return;
         }
