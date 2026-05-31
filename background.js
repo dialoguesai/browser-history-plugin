@@ -194,7 +194,7 @@ async function sendToControlPlaneAppIngest(sourceId, records) {
             console.error('[APP_INGEST] Failed to send', sourceId, ':', response.status, await response.text());
             await setDialoguesEngineWarningBadge(true);
         } else {
-            console.log('[APP_INGEST] Successfully sent', sourceId, 'to Control Plane');
+            console.log('[APP_INGEST] Successfully sent', sourceId, `(${records.length} record(s))`, 'to Control Plane');
             await setDialoguesEngineWarningBadge(false);
         }
     } catch (err) {
@@ -518,207 +518,187 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     }
 });
 
-chrome.runtime.onMessage.addListener(async (msg, sender) => {
-    console.log('🛰️ BG onMessage:', msg, sender);
-    // Handle starring a page
-    // console.log('Saving to supabase...')
-    if (msg.type === 'STAR_PAGE') {
-        console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
+async function handleStarPageMessage(msg, sender) {
+    console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
 
-        // ─── get device_name from storage ────────────────────────────────────────────
-        const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
-        console.log('[STAR_PAGE] device_name from storage:', device_name);
+    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
 
-        // Build record for starred_websites table and/or Control Plane browser_events
-        const record = {
-            url: msg.url,
-            starred_at: new Date().toISOString(),
-            visited_at: new Date().toISOString(),
-            device_name,
-            title: msg.title,
-            favicon_url: msg.favicon_url,
-            tab_id: msg.tab_id,
-            window_id: msg.window_id,
-            incognito: msg.incognito,
-            transition_type: msg.transition_type,
-            hostname: msg.hostname,
-            pinned: msg.pinned,
-            audible: msg.audible,
-            muted: msg.muted,
-            opener_tab_id: msg.opener_tab_id,
-            referred_by: null,
-            event_type: 'star_page'
-        };
-        console.log('[STAR_PAGE] Record to insert:', record);
-
-        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
-        await sendToControlPlaneAppIngest('browser_events', [record]);
-
-        if (supabase) {
-            try {
-                const result = await supabase.from('starred_websites').insert(record);
-                console.log('[STAR_PAGE] Supabase insert result:', result);
-                if (result.error) {
-                    console.error('[STAR_PAGE] Supabase star insert error:', result.error);
-                    chrome.notifications?.create({
-                        type: 'basic',
-                        iconUrl: 'icons/icon-48.png',
-                        title: 'Star Website',
-                        message: 'Failed to star website: ' + (result.error.message || 'Unknown error')
-                    });
-                } else {
-                    console.log('[STAR_PAGE] Starred website successfully:', record);
-                    chrome.notifications?.create({
-                        type: 'basic',
-                        iconUrl: 'icons/icon-48.png',
-                        title: 'Star Website',
-                        message: 'Website starred successfully!'
-                    });
-                }
-            } catch (err) {
-                console.error('[STAR_PAGE] Unexpected error starring website', err);
-                chrome.notifications?.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon-48.png',
-                    title: 'Star Website',
-                    message: 'Unexpected error: ' + (err.message || 'Unknown error')
-                });
-            }
-        } else {
-            const { dialoguesToken } = await chrome.storage.sync.get({ dialoguesToken: '' });
-            if (!dialoguesToken) {
-                chrome.notifications?.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon-48.png',
-                    title: 'Star Website',
-                    message: 'Supabase not configured. Use Attach Dialogues in Options to save stars.'
-                });
-            }
+    let tabInfo = {};
+    if (msg.tab_id == null && sender?.tab?.id) {
+        try {
+            const t = await chrome.tabs.get(sender.tab.id);
+            tabInfo = {
+                tab_id: t.id,
+                window_id: t.windowId,
+                incognito: t.incognito,
+                pinned: t.pinned,
+                audible: t.audible,
+                muted: t.mutedInfo?.muted ?? false,
+                opener_tab_id: t.openerTabId ?? null
+            };
+        } catch (e) {
+            console.warn('[STAR_PAGE] Could not fetch tab info:', e);
         }
-        return;
     }
 
-    // Enhanced event tracking for "click" and "highlight" events
-    if (msg.event_type === 'click' || msg.event_type === 'highlight') {
-        // Try to fill in tab details if we can
-        let tabInfo = {};
+    const record = {
+        url: msg.url,
+        starred_at: new Date().toISOString(),
+        visited_at: new Date().toISOString(),
+        device_name,
+        title: msg.title,
+        favicon_url: msg.favicon_url,
+        tab_id: msg.tab_id ?? tabInfo.tab_id,
+        window_id: msg.window_id ?? tabInfo.window_id,
+        incognito: msg.incognito ?? tabInfo.incognito,
+        transition_type: msg.transition_type,
+        hostname: msg.hostname,
+        pinned: msg.pinned ?? tabInfo.pinned,
+        audible: msg.audible ?? tabInfo.audible,
+        muted: msg.muted ?? tabInfo.muted,
+        opener_tab_id: msg.opener_tab_id ?? tabInfo.opener_tab_id,
+        referred_by: null,
+        event_type: 'star_page'
+    };
+
+    await sendToControlPlaneAppIngest('browser_events', [record]);
+
+    if (supabase) {
         try {
-            if (sender.tab?.id) {
-                const t = await chrome.tabs.get(sender.tab.id);
-                tabInfo = {
-                    tab_id: t.id,
-                    window_id: t.windowId,
-                    incognito: t.incognito,
-                    pinned: t.pinned,
-                    audible: t.audible,
-                    muted: t.mutedInfo?.muted ?? false,
-                    opener_tab_id: t.openerTabId ?? null
-                };
+            const result = await supabase.from('starred_websites').insert(record);
+            if (result.error) {
+                console.error('[STAR_PAGE] Supabase star insert error:', result.error);
             }
-        } catch (e) {
-            console.warn('Could not fetch tab info for event:', e);
+        } catch (err) {
+            console.error('[STAR_PAGE] Unexpected error starring website', err);
         }
-
-        // Build the full record to satisfy every non-null column
-        const record = {
-            url: msg.url,
-            visited_at: msg.visited_at,
-            title: msg.title,
-            favicon_url: msg.favicon_url,
-            hostname: msg.hostname,
-            transition_type: msg.transition_type,
-            device_name: msg.device_name,
-            user_id: msg.user_id,
-            referred_by: msg.referred_by,
-            event_type: msg.event_type,
-            content: msg.content,
-            ...tabInfo
-        };
-
-        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
-        await sendToControlPlaneAppIngest('browser_events', [record]);
-
-        // Legacy Supabase path: only if Supabase is configured (and Attach Dialogues may not be active)
-        if (supabase) {
-            try {
-                const { error } = await supabase
-                    .from('browserplugin')
-                    .insert(record);
-
-                if (error) {
-                    console.error(`[${msg.event_type}] Supabase insert error:`, error);
-                } else {
-                    console.log(`[${msg.event_type}] Event logged:`, record);
-                }
-            } catch (err) {
-                console.error(`[${msg.event_type}] Unexpected error logging event`, err);
-            }
-        }
-
-        return;
     }
-    if (msg.event_type === 'VIDEO_PLAY') {
-        if (!supabase) return;
+}
 
-        // 1) Use the page URL for filtering (blob: URLs will break URL())
-        let host;
+async function handleClickOrHighlightMessage(msg, sender) {
+    const eventType = msg.event_type || msg.type;
+    let tabInfo = {};
+    try {
+        if (sender.tab?.id) {
+            const t = await chrome.tabs.get(sender.tab.id);
+            tabInfo = {
+                tab_id: t.id,
+                window_id: t.windowId,
+                incognito: t.incognito,
+                pinned: t.pinned,
+                audible: t.audible,
+                muted: t.mutedInfo?.muted ?? false,
+                opener_tab_id: t.openerTabId ?? null
+            };
+        }
+    } catch (e) {
+        console.warn('Could not fetch tab info for event:', e);
+    }
+
+    const record = {
+        url: msg.url,
+        visited_at: msg.visited_at,
+        title: msg.title,
+        favicon_url: msg.favicon_url,
+        hostname: msg.hostname,
+        transition_type: msg.transition_type,
+        device_name: msg.device_name,
+        user_id: msg.user_id,
+        referred_by: msg.referred_by,
+        event_type: eventType,
+        content: msg.content,
+        ...tabInfo
+    };
+
+    await sendToControlPlaneAppIngest('browser_events', [record]);
+
+    if (supabase) {
         try {
-            host = new URL(msg.url).hostname;
-        } catch {
-            console.warn('Invalid page URL for VIDEO_PLAY:', msg.url);
-            host = null;
-        }
-        if (host && shouldSkipHostname(host)) {
-            console.log('Skipped video_play on domain:', host);
-            return;
-        }
-
-        // 2) Optionally enrich with tab info
-        let tabInfo = {};
-        try {
-            if (sender.tab?.id) {
-                const t = await chrome.tabs.get(sender.tab.id);
-                tabInfo = {
-                    tab_id: t.id,
-                    window_id: t.windowId,
-                    incognito: t.incognito,
-                    pinned: t.pinned,
-                    audible: t.audible,
-                    muted: t.mutedInfo?.muted ?? false,
-                    opener_tab_id: t.openerTabId ?? null
-                };
-            }
-        } catch (e) {
-            console.warn('Could not fetch tab info for VIDEO_PLAY', e);
-        }
-
-        // 3) Build the complete record matching your schema
-        const record = {
-            url: msg.url,
-            visited_at: msg.visited_at,
-            title: msg.title,
-            favicon_url: msg.favicon_url,
-            hostname: host,
-            transition_type: 'video_play',
-            device_name: msg.device_name,
-            user_id: msg.user_id,
-            referred_by: msg.referred_by,
-            event_type: msg.event_type,
-            content: msg.content,   // { videoUrl: 'blob:…' }
-            ...tabInfo
-        };
-
-        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
-        await sendToControlPlaneAppIngest('browser_events', [record]);
-
-        if (supabase) {
             const { error } = await supabase.from('browserplugin').insert(record);
-            if (error) console.error('[VIDEO_PLAY] Supabase insert error:', error);
-            else console.log('[VIDEO_PLAY] Event logged:', record);
+            if (error) console.error(`[${eventType}] Supabase insert error:`, error);
+        } catch (err) {
+            console.error(`[${eventType}] Unexpected error logging event`, err);
         }
-
-        return; // done handling VIDEO_PLAY
     }
+}
+
+async function handleVideoPlayMessage(msg, sender) {
+    let host;
+    try {
+        host = new URL(msg.url).hostname;
+    } catch {
+        console.warn('Invalid page URL for VIDEO_PLAY:', msg.url);
+        host = null;
+    }
+    if (host && shouldSkipHostname(host)) {
+        console.log('Skipped video_play on domain:', host);
+        return;
+    }
+
+    let tabInfo = {};
+    try {
+        if (sender.tab?.id) {
+            const t = await chrome.tabs.get(sender.tab.id);
+            tabInfo = {
+                tab_id: t.id,
+                window_id: t.windowId,
+                incognito: t.incognito,
+                pinned: t.pinned,
+                audible: t.audible,
+                muted: t.mutedInfo?.muted ?? false,
+                opener_tab_id: t.openerTabId ?? null
+            };
+        }
+    } catch (e) {
+        console.warn('Could not fetch tab info for VIDEO_PLAY', e);
+    }
+
+    const record = {
+        url: msg.url,
+        visited_at: msg.visited_at,
+        title: msg.title,
+        favicon_url: msg.favicon_url,
+        hostname: host,
+        transition_type: 'video_play',
+        device_name: msg.device_name,
+        user_id: msg.user_id,
+        referred_by: msg.referred_by,
+        event_type: 'VIDEO_PLAY',
+        content: msg.content,
+        ...tabInfo
+    };
+
+    await sendToControlPlaneAppIngest('browser_events', [record]);
+
+    if (supabase) {
+        const { error } = await supabase.from('browserplugin').insert(record);
+        if (error) console.error('[VIDEO_PLAY] Supabase insert error:', error);
+    }
+}
+
+async function handleContentScriptMessage(msg, sender) {
+    console.log('[CONTENT_EVENT] Received:', msg.event_type || msg.type, msg.url?.slice?.(0, 80));
+
+    const eventType = msg.event_type || msg.type;
+    if (eventType === 'STAR_PAGE' || msg.type === 'STAR_PAGE') {
+        await handleStarPageMessage(msg, sender);
+        return;
+    }
+    if (eventType === 'click' || eventType === 'highlight') {
+        await handleClickOrHighlightMessage(msg, sender);
+        return;
+    }
+    if (eventType === 'VIDEO_PLAY') {
+        await handleVideoPlayMessage(msg, sender);
+    }
+}
+
+// MV3: return true synchronously so the service worker stays alive until async ingest completes.
+chrome.runtime.onMessage.addListener((msg, sender) => {
+    void handleContentScriptMessage(msg, sender).catch((err) => {
+        console.error('[CONTENT_EVENT] Handler failed:', err);
+    });
+    return true;
 });
 
 // Context menu: Star Site
@@ -745,6 +725,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     const payload = {
         type: 'STAR_PAGE',
+        event_type: 'STAR_PAGE',
         url,
         title: tab.title,
         favicon_url: tab.favIconUrl,
@@ -759,6 +740,5 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         opener_tab_id: tab.openerTabId ?? null
     };
 
-    // Reuse existing STAR_PAGE handler
-    chrome.runtime.sendMessage(payload);
+    await handleStarPageMessage(payload, { tab });
 });
