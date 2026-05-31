@@ -203,105 +203,138 @@ async function sendToControlPlaneAppIngest(sourceId, records) {
     }
 }
 
+const processedGrantRedirectUrls = new Set();
+
+function closeApprovalTab(tabId) {
+    if (tabId == null) return;
+    chrome.tabs.remove(tabId, () => {
+        if (chrome.runtime.lastError) {
+            console.log('[BACKGROUND] Approval tab already closed:', chrome.runtime.lastError.message);
+        }
+        chrome.storage.sync.remove(['_approvalTabId']);
+    });
+}
+
+async function exchangeGrantCodeInBackground(code, state, tabId) {
+    const base = await new Promise((resolve) => {
+        chrome.storage.sync.get(
+            ['dialoguesUrl', 'dialoguesControlPlaneUrl', 'dialoguesClientSecret', '_grantPendingState'],
+            (items) => resolve(items)
+        );
+    });
+    const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+    const dialoguesClientSecret = (base.dialoguesClientSecret || '').trim();
+    if (!controlPlaneUrl) {
+        console.warn('[BACKGROUND] Missing Control Plane URL; cannot exchange grant code');
+        return false;
+    }
+    if (state && base._grantPendingState && state !== base._grantPendingState) {
+        console.warn('[BACKGROUND] Grant state mismatch; attempting exchange anyway');
+    }
+    const exchangeResp = await fetch(`${controlPlaneUrl}/connect/exchange`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+            code,
+            app_id: 'browser-plugin',
+            ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret } : {})
+        })
+    });
+    const payload = await exchangeResp.json().catch(() => ({}));
+    if (!exchangeResp.ok) {
+        console.warn(
+            '[BACKGROUND] Grant exchange failed:',
+            exchangeResp.status,
+            payload?.error_description || payload?.error || '(no error body)'
+        );
+        return false;
+    }
+    const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
+    const resourceId = String(payload?.resource_id || '').trim();
+    if (!runToken || !resourceId) {
+        console.warn('[BACKGROUND] Grant exchange missing token/resource_id');
+        return false;
+    }
+    await setDialoguesErrorBadge(false);
+    await setDialoguesEngineWarningBadge(false);
+    await new Promise((resolve) => {
+        chrome.storage.sync.set({
+            dialoguesToken: runToken,
+            dialoguesResourceId: resourceId,
+            dialoguesControlPlaneUrl: controlPlaneUrl,
+            _grantQueryProcessed: true
+        }, resolve);
+    });
+    await new Promise((resolve) => chrome.storage.sync.remove(['_grantPendingState'], resolve));
+    console.log('[BACKGROUND] ✓ Token/resource_id stored from Grant Access code exchange');
+    closeApprovalTab(tabId);
+    if (chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+    }
+    return true;
+}
+
+function handleGrantRedirectUrl(url, tabId) {
+    if (!url || !url.includes('options.html')) return;
+    if (processedGrantRedirectUrls.has(url)) return;
+
+    try {
+        const parsed = new URL(url);
+        const code = (parsed.searchParams.get('code') || '').trim();
+        const state = (parsed.searchParams.get('state') || '').trim();
+        if (code) {
+            processedGrantRedirectUrls.add(url);
+            console.log('[BACKGROUND] Intercepted Grant Access code redirect');
+            exchangeGrantCodeInBackground(code, state, tabId).catch((err) => {
+                processedGrantRedirectUrls.delete(url);
+                console.warn('[BACKGROUND] Grant redirect exchange error:', err);
+            });
+            return;
+        }
+    } catch (e) {
+        console.warn('[BACKGROUND] Failed to parse options redirect URL:', e);
+    }
+
+    const hashMatch = url.match(/#(.+)$/);
+    if (hashMatch && hashMatch[1]) {
+        console.log('[BACKGROUND] Intercepted options.html redirect with hash:', hashMatch[1].substring(0, 50) + '...');
+        const params = new URLSearchParams(hashMatch[1]);
+        const access_token = params.get('access_token');
+        const resource_id = params.get('resource_id');
+        if (access_token && resource_id) {
+            console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
+            chrome.storage.sync.get(['dialoguesUrl', 'dialoguesControlPlaneUrl'], async (base) => {
+                const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+                const toSet = {
+                    dialoguesToken: access_token,
+                    dialoguesResourceId: resource_id,
+                    _redirectHashProcessed: true
+                };
+                if (controlPlaneUrl) toSet.dialoguesControlPlaneUrl = controlPlaneUrl;
+                await setDialoguesErrorBadge(false);
+                await setDialoguesEngineWarningBadge(false);
+                chrome.storage.sync.set(toSet, () => {
+                    console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect; control plane URL:', controlPlaneUrl || '(not set – set Dialogues URL in Options and re-attach)');
+                    closeApprovalTab(tabId);
+                });
+            });
+        }
+    }
+}
+
+// Arc blocks chrome-extension:// navigations in regular tabs; intercept before the page loads.
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+    if (details.frameId !== 0) return;
+    handleGrantRedirectUrl(details.url, details.tabId);
+});
+
 // Intercept redirects to options.html and extract hash parameters before page loads
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.url && tab.url && tab.url.includes('options.html')) {
-        // New Grant Access flow: options.html?code=...&state=...
-        try {
-            const parsed = new URL(tab.url);
-            const code = (parsed.searchParams.get('code') || '').trim();
-            const state = (parsed.searchParams.get('state') || '').trim();
-            if (code) {
-                console.log('[BACKGROUND] Intercepted Grant Access code redirect');
-                chrome.storage.sync.get(
-                    ['dialoguesUrl', 'dialoguesControlPlaneUrl', 'dialoguesClientSecret', '_grantPendingState'],
-                    async (base) => {
-                        try {
-                            const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
-                            const dialoguesClientSecret = (base.dialoguesClientSecret || '').trim();
-                            if (!controlPlaneUrl) {
-                                console.warn('[BACKGROUND] Missing Control Plane URL; cannot exchange grant code');
-                                return;
-                            }
-                            if (state && base._grantPendingState && state !== base._grantPendingState) {
-                                console.warn('[BACKGROUND] Grant state mismatch; attempting exchange anyway');
-                            }
-                            const exchangeResp = await fetch(`${controlPlaneUrl}/connect/exchange`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Accept': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    code,
-                                    app_id: 'browser-plugin',
-                                    ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret } : {})
-                                })
-                            });
-                            const payload = await exchangeResp.json().catch(() => ({}));
-                            if (!exchangeResp.ok) {
-                                console.warn(
-                                    '[BACKGROUND] Grant exchange failed:',
-                                    exchangeResp.status,
-                                    payload?.error_description || payload?.error || '(no error body)'
-                                );
-                                return;
-                            }
-                            const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
-                            const resourceId = String(payload?.resource_id || '').trim();
-                            if (!runToken || !resourceId) {
-                                console.warn('[BACKGROUND] Grant exchange missing token/resource_id');
-                                return;
-                            }
-                            await setDialoguesErrorBadge(false);
-                            await setDialoguesEngineWarningBadge(false);
-                            chrome.storage.sync.set({
-                                dialoguesToken: runToken,
-                                dialoguesResourceId: resourceId,
-                                dialoguesControlPlaneUrl: controlPlaneUrl,
-                                _grantQueryProcessed: true
-                            }, () => {
-                                console.log('[BACKGROUND] ✓ Token/resource_id stored from Grant Access code exchange');
-                                chrome.storage.sync.remove(['_grantPendingState']);
-                                // Navigate to clean options URL to avoid client blockers on query callback URLs.
-                                chrome.tabs.update(tabId, { url: chrome.runtime.getURL('options.html') });
-                            });
-                        } catch (err) {
-                            console.warn('[BACKGROUND] Grant redirect exchange error:', err);
-                        }
-                    }
-                );
-                return;
-            }
-        } catch (e) {
-            console.warn('[BACKGROUND] Failed to parse options redirect URL:', e);
-        }
-
-        const hashMatch = tab.url.match(/#(.+)$/);
-        if (hashMatch && hashMatch[1]) {
-            console.log('[BACKGROUND] Intercepted options.html redirect with hash:', hashMatch[1].substring(0, 50) + '...');
-            const params = new URLSearchParams(hashMatch[1]);
-            const access_token = params.get('access_token');
-            const resource_id = params.get('resource_id');
-            if (access_token && resource_id) {
-                console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
-                // Preserve dialoguesControlPlaneUrl (set when user clicked Attach Dialogues)
-                chrome.storage.sync.get(['dialoguesUrl', 'dialoguesControlPlaneUrl'], async (base) => {
-                    const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
-                    const toSet = {
-                        dialoguesToken: access_token,
-                        dialoguesResourceId: resource_id,
-                        _redirectHashProcessed: true
-                    };
-                    if (controlPlaneUrl) toSet.dialoguesControlPlaneUrl = controlPlaneUrl;
-                    await setDialoguesErrorBadge(false);
-                    await setDialoguesEngineWarningBadge(false);
-                    chrome.storage.sync.set(toSet, () => {
-                        console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect; control plane URL:', controlPlaneUrl || '(not set – set Dialogues URL in Options and re-attach)');
-                    });
-                });
-            }
-        }
+        handleGrantRedirectUrl(tab.url, tabId);
     }
 });
 

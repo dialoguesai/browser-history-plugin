@@ -137,6 +137,47 @@ function parseRedirectHash() {
     });
 }
 
+function getGrantRedirectUri() {
+    if (chrome.identity?.getRedirectURL) {
+        return chrome.identity.getRedirectURL();
+    }
+    return chrome.runtime.getURL('options.html');
+}
+
+async function exchangeGrantCode(code, stateFromUrl = '') {
+    const { dialoguesUrl, dialoguesControlPlaneUrl, dialoguesClientSecret, _grantPendingState } = await chrome.storage.sync.get({
+        dialoguesUrl: DEFAULT_DIALOGUES_URL,
+        dialoguesControlPlaneUrl: '',
+        dialoguesClientSecret: '',
+        _grantPendingState: ''
+    });
+    if (stateFromUrl && _grantPendingState && stateFromUrl !== _grantPendingState) {
+        console.warn('[OPTIONS] Grant state mismatch; continuing exchange to avoid user lockout');
+    }
+    const base = (dialoguesControlPlaneUrl || dialoguesUrl || DEFAULT_DIALOGUES_URL).replace(/\/$/, '');
+    const exchangeResp = await fetch(`${base}/connect/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+            code,
+            app_id: DIALOGUES_CONNECT_APP_ID,
+            ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret.trim() } : {})
+        })
+    });
+    const payload = await exchangeResp.json().catch(() => ({}));
+    if (!exchangeResp.ok) {
+        const err = payload?.error_description || payload?.error || `exchange_failed (${exchangeResp.status})`;
+        throw new Error(err);
+    }
+    const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
+    const resourceId = String(payload?.resource_id || '').trim();
+    if (!runToken || !resourceId) {
+        throw new Error('Grant exchange did not return token/resource_id');
+    }
+    _saveTokenAndResourceId(runToken, resourceId);
+    await chrome.storage.sync.remove(['_grantPendingState']);
+}
+
 async function parseGrantRedirectQuery() {
     if (grantQueryHandled) return;
     const qs = new URLSearchParams(window.location.search);
@@ -152,37 +193,7 @@ async function parseGrantRedirectQuery() {
         return;
     }
     try {
-        const { dialoguesUrl, dialoguesControlPlaneUrl, dialoguesClientSecret, _grantPendingState } = await chrome.storage.sync.get({
-            dialoguesUrl: DEFAULT_DIALOGUES_URL,
-            dialoguesControlPlaneUrl: '',
-            dialoguesClientSecret: '',
-            _grantPendingState: ''
-        });
-        if (stateFromUrl && _grantPendingState && stateFromUrl !== _grantPendingState) {
-            console.warn('[OPTIONS] Grant state mismatch; continuing exchange to avoid user lockout');
-        }
-        const base = (dialoguesControlPlaneUrl || dialoguesUrl || DEFAULT_DIALOGUES_URL).replace(/\/$/, '');
-        const exchangeResp = await fetch(`${base}/connect/exchange`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({
-                code,
-                app_id: DIALOGUES_CONNECT_APP_ID,
-                ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret.trim() } : {})
-            })
-        });
-        const payload = await exchangeResp.json().catch(() => ({}));
-        if (!exchangeResp.ok) {
-            const err = payload?.error_description || payload?.error || `exchange_failed (${exchangeResp.status})`;
-            throw new Error(err);
-        }
-        const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
-        const resourceId = String(payload?.resource_id || '').trim();
-        if (!runToken || !resourceId) {
-            throw new Error('Grant exchange did not return token/resource_id');
-        }
-        _saveTokenAndResourceId(runToken, resourceId);
-        await chrome.storage.sync.remove(['_grantPendingState']);
+        await exchangeGrantCode(code, stateFromUrl);
         const cleanUrl = window.location.pathname + window.location.hash;
         window.history.replaceState(null, '', cleanUrl);
     } catch (e) {
@@ -348,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Attach Dialogues via universal Grant Access flow: /connect -> /connect/exchange
 attachDialoguesBtn.addEventListener('click', async () => {
     const base = (dialoguesUrlInput.value || DEFAULT_DIALOGUES_URL).replace(/\/$/, '');
-    const redirectUri = chrome.runtime.getURL('options.html');
+    const redirectUri = getGrantRedirectUri();
     const pendingState = `grant-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const params = new URLSearchParams({
         app_id: DIALOGUES_CONNECT_APP_ID,
@@ -360,11 +371,42 @@ attachDialoguesBtn.addEventListener('click', async () => {
     });
     const url = `${base}/connect?${params.toString()}`;
     console.log('[OPTIONS] Opening Grant Access connect URL:', url);
+    console.log('[OPTIONS] redirect_uri:', redirectUri);
     await chrome.storage.sync.set({
         dialoguesUrl: base,
         dialoguesControlPlaneUrl: base,
         _grantPendingState: pendingState
     });
+
+    // Arc blocks top-level navigation to chrome-extension:// after OAuth. launchWebAuthFlow avoids that.
+    if (chrome.identity?.launchWebAuthFlow) {
+        console.log('[OPTIONS] Using chrome.identity.launchWebAuthFlow');
+        chrome.identity.launchWebAuthFlow({ url, interactive: true }, async (responseUrl) => {
+            if (chrome.runtime.lastError) {
+                setAttachStatus(`Attach cancelled: ${chrome.runtime.lastError.message}`, 'red');
+                return;
+            }
+            if (!responseUrl) {
+                setAttachStatus('Attach cancelled', 'red');
+                return;
+            }
+            try {
+                const parsed = new URL(responseUrl);
+                const error = (parsed.searchParams.get('error') || '').trim();
+                if (error) throw new Error(error);
+                const code = (parsed.searchParams.get('code') || '').trim();
+                const stateFromUrl = (parsed.searchParams.get('state') || '').trim();
+                if (!code) throw new Error('No authorization code in redirect');
+                grantQueryHandled = true;
+                await exchangeGrantCode(code, stateFromUrl);
+            } catch (e) {
+                console.error('[OPTIONS] Grant exchange failed:', e);
+                setAttachStatus(`Grant exchange failed: ${e?.message || e}`, 'red');
+            }
+        });
+        return;
+    }
+
     chrome.tabs.create({ url }, (tab) => {
         chrome.storage.sync.set({ _approvalTabId: tab.id });
     });

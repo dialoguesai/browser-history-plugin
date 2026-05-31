@@ -2,11 +2,23 @@
 
 This is meant to be a plugin to submit Browsing data to one's Topos.
 
+## Loading the extension (Chrome / Arc / Edge)
+
+1. Open your browser's extensions page:
+   - **Chrome:** `chrome://extensions`
+   - **Arc:** `arc://extensions`
+   - **Edge:** `edge://extensions`
+2. Enable **Developer mode** (toggle in the top-right).
+3. Click **Load unpacked** and select this folder (`browser-plugin/` — the one that contains `manifest.json`).
+4. Optional: pin the extension from the toolbar or Site Controls menu so Options is easy to reach.
+
+Each unpacked install gets a **unique extension ID**. You must register that ID with Control Plane before **Attach Dialogues** will work (see below).
+
 ## Where to see extension logs (one place for all tabs)
 
 You do **not** need to open the console on every new tab or page. The code that sends visits runs in the **extension’s background (service worker)**. Use a single console for all activity:
 
-1. Open **`chrome://extensions`**
+1. Open **`chrome://extensions`** or **`arc://extensions`**
 2. Find **URL Logger / Dialogues Browser Extension**
 3. Click **“Service worker”** (or “Inspect views: background page”)  
    → DevTools opens for the **background script**
@@ -25,7 +37,77 @@ The plugin is registered in the Control Plane **app registry** as a first-party 
 - **`app_id`:** `browser-plugin`  
 - **Name:** Dialogues Browser Extension  
 
-One-time registration is done via script: see repo `scripts/register_browser_plugin_app.sh` (requires `CONTROL_PLANE_URL` and `CONTROL_PLANE_ADMIN_KEY`).
+One-time app registration (creates the app row only) is done via script in the Control Plane repo: `scripts/register_browser_plugin_app.sh` (requires `CONTROL_PLANE_URL` and `CONTROL_PLANE_ADMIN_KEY`).
+
+### Register your redirect URI (required for each local install)
+
+**Attach Dialogues** sends users through Control Plane OAuth with a callback to your extension's Options page. Control Plane only accepts redirect URIs that are explicitly allowlisted for the app.
+
+When you **Load unpacked**, the browser assigns an extension ID that is unique to that install (and to the folder path). A redirect URI registered for someone else's Chrome install will **not** work on your Arc or dev Chrome install.
+
+#### 1. Find your extension ID and redirect URIs
+
+On `chrome://extensions` or `arc://extensions`, find **URL Logger to Supabase** and copy the **ID** (32 lowercase letters), e.g. `nhchpdllklekegfalgklbeedainhjjif`.
+
+Register **both** of these redirect URIs for your install:
+
+```text
+chrome-extension://<YOUR_EXTENSION_ID>/options.html
+https://<YOUR_EXTENSION_ID>.chromiumapp.org/
+```
+
+The `chromiumapp.org` URI is used by **Attach Dialogues** via `chrome.identity.launchWebAuthFlow` (required on **Arc**, which blocks top-level navigation to `chrome-extension://` after OAuth with `ERR_BLOCKED_BY_CLIENT`).
+
+You can confirm the active `redirect_uri` in the Options page DevTools console after clicking **Attach Dialogues** — the plugin logs the full `/connect` URL.
+
+#### 2. Add the redirect URI to Control Plane
+
+Requires `CONTROL_PLANE_ADMIN_KEY` and access to `PATCH /v1/apps/browser-plugin`.
+
+**First, fetch existing URIs** so you don't remove other developers' installs:
+
+```bash
+export CONTROL_PLANE_URL="https://cp.logu3s.com"   # or http://localhost:8000 for local CP
+export CONTROL_PLANE_ADMIN_KEY="your-admin-key"
+
+curl -s -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}" \
+  "${CONTROL_PLANE_URL}/v1/apps/browser-plugin" | jq '.metadata.allowed_redirect_uris'
+```
+
+**Then PATCH** — this merges your URI into the existing list without removing other installs:
+
+```bash
+export EXTENSION_ID="YOUR_EXTENSION_ID"
+export REDIRECT_OPTIONS="chrome-extension://${EXTENSION_ID}/options.html"
+export REDIRECT_CHROMIUM="https://${EXTENSION_ID}.chromiumapp.org/"
+
+curl -s -X PATCH "${CONTROL_PLANE_URL}/v1/apps/browser-plugin" \
+  -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "$(curl -s -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}" \
+    "${CONTROL_PLANE_URL}/v1/apps/browser-plugin" \
+    | jq --arg a "$REDIRECT_OPTIONS" --arg b "$REDIRECT_CHROMIUM" \
+      '.metadata.allowed_redirect_uris += [$a, $b] | {allowed_redirect_uris: .metadata.allowed_redirect_uris | unique}')"
+```
+
+On success, `allowed_redirect_uris` in the response should include both URIs.
+
+After changing extension code, **reload the extension** on `arc://extensions` (click the reload icon) so the new `identity` permission and Arc-safe attach flow take effect.
+
+If attach fails with **`invalid_redirect_uri`** or **"redirect_uri is not registered for this app"**, this step was skipped or the wrong ID was used.
+
+#### 3. Set the client secret in Options
+
+The `browser-plugin` app uses **`client_secret_required`** mode. Paste the app client secret (`cas_...`) into **Dialogues Client Secret** on the extension Options page before attaching. Without it, `/connect/exchange` fails after login.
+
+To issue or rotate a secret (admin only):
+
+```bash
+curl -s -X POST "${CONTROL_PLANE_URL}/v1/apps/browser-plugin/client-auth/issue" \
+  -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}"
+```
+
+The response includes `client_secret` once — store it securely and enter it in Options.
 
 ---
 
@@ -79,6 +161,7 @@ When "Attach Dialogues" is active, the plugin sends the following data to the Co
 
 ### Error Handling
 
+- **Arc: `ERR_BLOCKED_BY_CLIENT` / "blocked by Arc" on extension ID:** Arc blocks OAuth callbacks that navigate a normal tab to `chrome-extension://...`. Reload the extension (uses `chrome.identity.launchWebAuthFlow` instead) and ensure `https://<YOUR_EXTENSION_ID>.chromiumapp.org/` is registered (see **Register your redirect URI** above).
 - **401/403 errors:** If the token expires or is revoked, the plugin will show an error badge and stop sending data. If the token keeps expiring soon after attach, see **Token goes inactive** in `app_registry_sprints/CONNECT_APP_FLOW.md` (set Keycloak Access Token Lifespan = 365 days on the resource server client).
 - **Re-attach required:** If you see connection errors, try clicking "Attach Dialogues" again to get a new token
 - **Check logs:** Use the Service worker console (see above) to see detailed error messages
