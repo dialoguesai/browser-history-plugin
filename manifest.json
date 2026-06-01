@@ -3,7 +3,7 @@
   "name": "URL Logger to Supabase",
   "version": "2.0.0",
   "description": "Logs every visited URL into a Supabase table",
-  "permissions": ["webNavigation", "storage", "tabs", "notifications", "contextMenus"],
+  "permissions": ["identity", "webNavigation", "storage", "tabs", "notifications", "contextMenus"],
   "host_permissions": ["<all_urls>"],
   "background": {"service_worker": "background.js", "type": "module"},
   "options_page": "options.html",

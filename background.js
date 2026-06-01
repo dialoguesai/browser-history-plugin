@@ -194,7 +194,7 @@ async function sendToControlPlaneAppIngest(sourceId, records) {
             console.error('[APP_INGEST] Failed to send', sourceId, ':', response.status, await response.text());
             await setDialoguesEngineWarningBadge(true);
         } else {
-            console.log('[APP_INGEST] Successfully sent', sourceId, 'to Control Plane');
+            console.log('[APP_INGEST] Successfully sent', sourceId, `(${records.length} record(s))`, 'to Control Plane');
             await setDialoguesEngineWarningBadge(false);
         }
     } catch (err) {
@@ -203,105 +203,138 @@ async function sendToControlPlaneAppIngest(sourceId, records) {
     }
 }
 
+const processedGrantRedirectUrls = new Set();
+
+function closeApprovalTab(tabId) {
+    if (tabId == null) return;
+    chrome.tabs.remove(tabId, () => {
+        if (chrome.runtime.lastError) {
+            console.log('[BACKGROUND] Approval tab already closed:', chrome.runtime.lastError.message);
+        }
+        chrome.storage.sync.remove(['_approvalTabId']);
+    });
+}
+
+async function exchangeGrantCodeInBackground(code, state, tabId) {
+    const base = await new Promise((resolve) => {
+        chrome.storage.sync.get(
+            ['dialoguesUrl', 'dialoguesControlPlaneUrl', 'dialoguesClientSecret', '_grantPendingState'],
+            (items) => resolve(items)
+        );
+    });
+    const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+    const dialoguesClientSecret = (base.dialoguesClientSecret || '').trim();
+    if (!controlPlaneUrl) {
+        console.warn('[BACKGROUND] Missing Control Plane URL; cannot exchange grant code');
+        return false;
+    }
+    if (state && base._grantPendingState && state !== base._grantPendingState) {
+        console.warn('[BACKGROUND] Grant state mismatch; attempting exchange anyway');
+    }
+    const exchangeResp = await fetch(`${controlPlaneUrl}/connect/exchange`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+            code,
+            app_id: 'browser-plugin',
+            ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret } : {})
+        })
+    });
+    const payload = await exchangeResp.json().catch(() => ({}));
+    if (!exchangeResp.ok) {
+        console.warn(
+            '[BACKGROUND] Grant exchange failed:',
+            exchangeResp.status,
+            payload?.error_description || payload?.error || '(no error body)'
+        );
+        return false;
+    }
+    const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
+    const resourceId = String(payload?.resource_id || '').trim();
+    if (!runToken || !resourceId) {
+        console.warn('[BACKGROUND] Grant exchange missing token/resource_id');
+        return false;
+    }
+    await setDialoguesErrorBadge(false);
+    await setDialoguesEngineWarningBadge(false);
+    await new Promise((resolve) => {
+        chrome.storage.sync.set({
+            dialoguesToken: runToken,
+            dialoguesResourceId: resourceId,
+            dialoguesControlPlaneUrl: controlPlaneUrl,
+            _grantQueryProcessed: true
+        }, resolve);
+    });
+    await new Promise((resolve) => chrome.storage.sync.remove(['_grantPendingState'], resolve));
+    console.log('[BACKGROUND] ✓ Token/resource_id stored from Grant Access code exchange');
+    closeApprovalTab(tabId);
+    if (chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+    }
+    return true;
+}
+
+function handleGrantRedirectUrl(url, tabId) {
+    if (!url || !url.includes('options.html')) return;
+    if (processedGrantRedirectUrls.has(url)) return;
+
+    try {
+        const parsed = new URL(url);
+        const code = (parsed.searchParams.get('code') || '').trim();
+        const state = (parsed.searchParams.get('state') || '').trim();
+        if (code) {
+            processedGrantRedirectUrls.add(url);
+            console.log('[BACKGROUND] Intercepted Grant Access code redirect');
+            exchangeGrantCodeInBackground(code, state, tabId).catch((err) => {
+                processedGrantRedirectUrls.delete(url);
+                console.warn('[BACKGROUND] Grant redirect exchange error:', err);
+            });
+            return;
+        }
+    } catch (e) {
+        console.warn('[BACKGROUND] Failed to parse options redirect URL:', e);
+    }
+
+    const hashMatch = url.match(/#(.+)$/);
+    if (hashMatch && hashMatch[1]) {
+        console.log('[BACKGROUND] Intercepted options.html redirect with hash:', hashMatch[1].substring(0, 50) + '...');
+        const params = new URLSearchParams(hashMatch[1]);
+        const access_token = params.get('access_token');
+        const resource_id = params.get('resource_id');
+        if (access_token && resource_id) {
+            console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
+            chrome.storage.sync.get(['dialoguesUrl', 'dialoguesControlPlaneUrl'], async (base) => {
+                const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+                const toSet = {
+                    dialoguesToken: access_token,
+                    dialoguesResourceId: resource_id,
+                    _redirectHashProcessed: true
+                };
+                if (controlPlaneUrl) toSet.dialoguesControlPlaneUrl = controlPlaneUrl;
+                await setDialoguesErrorBadge(false);
+                await setDialoguesEngineWarningBadge(false);
+                chrome.storage.sync.set(toSet, () => {
+                    console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect; control plane URL:', controlPlaneUrl || '(not set – set Dialogues URL in Options and re-attach)');
+                    closeApprovalTab(tabId);
+                });
+            });
+        }
+    }
+}
+
+// Arc blocks chrome-extension:// navigations in regular tabs; intercept before the page loads.
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+    if (details.frameId !== 0) return;
+    handleGrantRedirectUrl(details.url, details.tabId);
+});
+
 // Intercept redirects to options.html and extract hash parameters before page loads
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.url && tab.url && tab.url.includes('options.html')) {
-        // New Grant Access flow: options.html?code=...&state=...
-        try {
-            const parsed = new URL(tab.url);
-            const code = (parsed.searchParams.get('code') || '').trim();
-            const state = (parsed.searchParams.get('state') || '').trim();
-            if (code) {
-                console.log('[BACKGROUND] Intercepted Grant Access code redirect');
-                chrome.storage.sync.get(
-                    ['dialoguesUrl', 'dialoguesControlPlaneUrl', 'dialoguesClientSecret', '_grantPendingState'],
-                    async (base) => {
-                        try {
-                            const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
-                            const dialoguesClientSecret = (base.dialoguesClientSecret || '').trim();
-                            if (!controlPlaneUrl) {
-                                console.warn('[BACKGROUND] Missing Control Plane URL; cannot exchange grant code');
-                                return;
-                            }
-                            if (state && base._grantPendingState && state !== base._grantPendingState) {
-                                console.warn('[BACKGROUND] Grant state mismatch; attempting exchange anyway');
-                            }
-                            const exchangeResp = await fetch(`${controlPlaneUrl}/connect/exchange`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Accept': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    code,
-                                    app_id: 'browser-plugin',
-                                    ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret } : {})
-                                })
-                            });
-                            const payload = await exchangeResp.json().catch(() => ({}));
-                            if (!exchangeResp.ok) {
-                                console.warn(
-                                    '[BACKGROUND] Grant exchange failed:',
-                                    exchangeResp.status,
-                                    payload?.error_description || payload?.error || '(no error body)'
-                                );
-                                return;
-                            }
-                            const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
-                            const resourceId = String(payload?.resource_id || '').trim();
-                            if (!runToken || !resourceId) {
-                                console.warn('[BACKGROUND] Grant exchange missing token/resource_id');
-                                return;
-                            }
-                            await setDialoguesErrorBadge(false);
-                            await setDialoguesEngineWarningBadge(false);
-                            chrome.storage.sync.set({
-                                dialoguesToken: runToken,
-                                dialoguesResourceId: resourceId,
-                                dialoguesControlPlaneUrl: controlPlaneUrl,
-                                _grantQueryProcessed: true
-                            }, () => {
-                                console.log('[BACKGROUND] ✓ Token/resource_id stored from Grant Access code exchange');
-                                chrome.storage.sync.remove(['_grantPendingState']);
-                                // Navigate to clean options URL to avoid client blockers on query callback URLs.
-                                chrome.tabs.update(tabId, { url: chrome.runtime.getURL('options.html') });
-                            });
-                        } catch (err) {
-                            console.warn('[BACKGROUND] Grant redirect exchange error:', err);
-                        }
-                    }
-                );
-                return;
-            }
-        } catch (e) {
-            console.warn('[BACKGROUND] Failed to parse options redirect URL:', e);
-        }
-
-        const hashMatch = tab.url.match(/#(.+)$/);
-        if (hashMatch && hashMatch[1]) {
-            console.log('[BACKGROUND] Intercepted options.html redirect with hash:', hashMatch[1].substring(0, 50) + '...');
-            const params = new URLSearchParams(hashMatch[1]);
-            const access_token = params.get('access_token');
-            const resource_id = params.get('resource_id');
-            if (access_token && resource_id) {
-                console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
-                // Preserve dialoguesControlPlaneUrl (set when user clicked Attach Dialogues)
-                chrome.storage.sync.get(['dialoguesUrl', 'dialoguesControlPlaneUrl'], async (base) => {
-                    const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
-                    const toSet = {
-                        dialoguesToken: access_token,
-                        dialoguesResourceId: resource_id,
-                        _redirectHashProcessed: true
-                    };
-                    if (controlPlaneUrl) toSet.dialoguesControlPlaneUrl = controlPlaneUrl;
-                    await setDialoguesErrorBadge(false);
-                    await setDialoguesEngineWarningBadge(false);
-                    chrome.storage.sync.set(toSet, () => {
-                        console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect; control plane URL:', controlPlaneUrl || '(not set – set Dialogues URL in Options and re-attach)');
-                    });
-                });
-            }
-        }
+        handleGrantRedirectUrl(tab.url, tabId);
     }
 });
 
@@ -485,207 +518,187 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     }
 });
 
-chrome.runtime.onMessage.addListener(async (msg, sender) => {
-    console.log('🛰️ BG onMessage:', msg, sender);
-    // Handle starring a page
-    // console.log('Saving to supabase...')
-    if (msg.type === 'STAR_PAGE') {
-        console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
+async function handleStarPageMessage(msg, sender) {
+    console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
 
-        // ─── get device_name from storage ────────────────────────────────────────────
-        const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
-        console.log('[STAR_PAGE] device_name from storage:', device_name);
+    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
 
-        // Build record for starred_websites table and/or Control Plane browser_events
-        const record = {
-            url: msg.url,
-            starred_at: new Date().toISOString(),
-            visited_at: new Date().toISOString(),
-            device_name,
-            title: msg.title,
-            favicon_url: msg.favicon_url,
-            tab_id: msg.tab_id,
-            window_id: msg.window_id,
-            incognito: msg.incognito,
-            transition_type: msg.transition_type,
-            hostname: msg.hostname,
-            pinned: msg.pinned,
-            audible: msg.audible,
-            muted: msg.muted,
-            opener_tab_id: msg.opener_tab_id,
-            referred_by: null,
-            event_type: 'star_page'
-        };
-        console.log('[STAR_PAGE] Record to insert:', record);
-
-        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
-        await sendToControlPlaneAppIngest('browser_events', [record]);
-
-        if (supabase) {
-            try {
-                const result = await supabase.from('starred_websites').insert(record);
-                console.log('[STAR_PAGE] Supabase insert result:', result);
-                if (result.error) {
-                    console.error('[STAR_PAGE] Supabase star insert error:', result.error);
-                    chrome.notifications?.create({
-                        type: 'basic',
-                        iconUrl: 'icons/icon-48.png',
-                        title: 'Star Website',
-                        message: 'Failed to star website: ' + (result.error.message || 'Unknown error')
-                    });
-                } else {
-                    console.log('[STAR_PAGE] Starred website successfully:', record);
-                    chrome.notifications?.create({
-                        type: 'basic',
-                        iconUrl: 'icons/icon-48.png',
-                        title: 'Star Website',
-                        message: 'Website starred successfully!'
-                    });
-                }
-            } catch (err) {
-                console.error('[STAR_PAGE] Unexpected error starring website', err);
-                chrome.notifications?.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon-48.png',
-                    title: 'Star Website',
-                    message: 'Unexpected error: ' + (err.message || 'Unknown error')
-                });
-            }
-        } else {
-            const { dialoguesToken } = await chrome.storage.sync.get({ dialoguesToken: '' });
-            if (!dialoguesToken) {
-                chrome.notifications?.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon-48.png',
-                    title: 'Star Website',
-                    message: 'Supabase not configured. Use Attach Dialogues in Options to save stars.'
-                });
-            }
+    let tabInfo = {};
+    if (msg.tab_id == null && sender?.tab?.id) {
+        try {
+            const t = await chrome.tabs.get(sender.tab.id);
+            tabInfo = {
+                tab_id: t.id,
+                window_id: t.windowId,
+                incognito: t.incognito,
+                pinned: t.pinned,
+                audible: t.audible,
+                muted: t.mutedInfo?.muted ?? false,
+                opener_tab_id: t.openerTabId ?? null
+            };
+        } catch (e) {
+            console.warn('[STAR_PAGE] Could not fetch tab info:', e);
         }
-        return;
     }
 
-    // Enhanced event tracking for "click" and "highlight" events
-    if (msg.event_type === 'click' || msg.event_type === 'highlight') {
-        // Try to fill in tab details if we can
-        let tabInfo = {};
+    const record = {
+        url: msg.url,
+        starred_at: new Date().toISOString(),
+        visited_at: new Date().toISOString(),
+        device_name,
+        title: msg.title,
+        favicon_url: msg.favicon_url,
+        tab_id: msg.tab_id ?? tabInfo.tab_id,
+        window_id: msg.window_id ?? tabInfo.window_id,
+        incognito: msg.incognito ?? tabInfo.incognito,
+        transition_type: msg.transition_type,
+        hostname: msg.hostname,
+        pinned: msg.pinned ?? tabInfo.pinned,
+        audible: msg.audible ?? tabInfo.audible,
+        muted: msg.muted ?? tabInfo.muted,
+        opener_tab_id: msg.opener_tab_id ?? tabInfo.opener_tab_id,
+        referred_by: null,
+        event_type: 'star_page'
+    };
+
+    await sendToControlPlaneAppIngest('browser_events', [record]);
+
+    if (supabase) {
         try {
-            if (sender.tab?.id) {
-                const t = await chrome.tabs.get(sender.tab.id);
-                tabInfo = {
-                    tab_id: t.id,
-                    window_id: t.windowId,
-                    incognito: t.incognito,
-                    pinned: t.pinned,
-                    audible: t.audible,
-                    muted: t.mutedInfo?.muted ?? false,
-                    opener_tab_id: t.openerTabId ?? null
-                };
+            const result = await supabase.from('starred_websites').insert(record);
+            if (result.error) {
+                console.error('[STAR_PAGE] Supabase star insert error:', result.error);
             }
-        } catch (e) {
-            console.warn('Could not fetch tab info for event:', e);
+        } catch (err) {
+            console.error('[STAR_PAGE] Unexpected error starring website', err);
         }
-
-        // Build the full record to satisfy every non-null column
-        const record = {
-            url: msg.url,
-            visited_at: msg.visited_at,
-            title: msg.title,
-            favicon_url: msg.favicon_url,
-            hostname: msg.hostname,
-            transition_type: msg.transition_type,
-            device_name: msg.device_name,
-            user_id: msg.user_id,
-            referred_by: msg.referred_by,
-            event_type: msg.event_type,
-            content: msg.content,
-            ...tabInfo
-        };
-
-        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
-        await sendToControlPlaneAppIngest('browser_events', [record]);
-
-        // Legacy Supabase path: only if Supabase is configured (and Attach Dialogues may not be active)
-        if (supabase) {
-            try {
-                const { error } = await supabase
-                    .from('browserplugin')
-                    .insert(record);
-
-                if (error) {
-                    console.error(`[${msg.event_type}] Supabase insert error:`, error);
-                } else {
-                    console.log(`[${msg.event_type}] Event logged:`, record);
-                }
-            } catch (err) {
-                console.error(`[${msg.event_type}] Unexpected error logging event`, err);
-            }
-        }
-
-        return;
     }
-    if (msg.event_type === 'VIDEO_PLAY') {
-        if (!supabase) return;
+}
 
-        // 1) Use the page URL for filtering (blob: URLs will break URL())
-        let host;
+async function handleClickOrHighlightMessage(msg, sender) {
+    const eventType = msg.event_type || msg.type;
+    let tabInfo = {};
+    try {
+        if (sender.tab?.id) {
+            const t = await chrome.tabs.get(sender.tab.id);
+            tabInfo = {
+                tab_id: t.id,
+                window_id: t.windowId,
+                incognito: t.incognito,
+                pinned: t.pinned,
+                audible: t.audible,
+                muted: t.mutedInfo?.muted ?? false,
+                opener_tab_id: t.openerTabId ?? null
+            };
+        }
+    } catch (e) {
+        console.warn('Could not fetch tab info for event:', e);
+    }
+
+    const record = {
+        url: msg.url,
+        visited_at: msg.visited_at,
+        title: msg.title,
+        favicon_url: msg.favicon_url,
+        hostname: msg.hostname,
+        transition_type: msg.transition_type,
+        device_name: msg.device_name,
+        user_id: msg.user_id,
+        referred_by: msg.referred_by,
+        event_type: eventType,
+        content: msg.content,
+        ...tabInfo
+    };
+
+    await sendToControlPlaneAppIngest('browser_events', [record]);
+
+    if (supabase) {
         try {
-            host = new URL(msg.url).hostname;
-        } catch {
-            console.warn('Invalid page URL for VIDEO_PLAY:', msg.url);
-            host = null;
-        }
-        if (host && shouldSkipHostname(host)) {
-            console.log('Skipped video_play on domain:', host);
-            return;
-        }
-
-        // 2) Optionally enrich with tab info
-        let tabInfo = {};
-        try {
-            if (sender.tab?.id) {
-                const t = await chrome.tabs.get(sender.tab.id);
-                tabInfo = {
-                    tab_id: t.id,
-                    window_id: t.windowId,
-                    incognito: t.incognito,
-                    pinned: t.pinned,
-                    audible: t.audible,
-                    muted: t.mutedInfo?.muted ?? false,
-                    opener_tab_id: t.openerTabId ?? null
-                };
-            }
-        } catch (e) {
-            console.warn('Could not fetch tab info for VIDEO_PLAY', e);
-        }
-
-        // 3) Build the complete record matching your schema
-        const record = {
-            url: msg.url,
-            visited_at: msg.visited_at,
-            title: msg.title,
-            favicon_url: msg.favicon_url,
-            hostname: host,
-            transition_type: 'video_play',
-            device_name: msg.device_name,
-            user_id: msg.user_id,
-            referred_by: msg.referred_by,
-            event_type: msg.event_type,
-            content: msg.content,   // { videoUrl: 'blob:…' }
-            ...tabInfo
-        };
-
-        // When Attach Dialogues is active, send to Control Plane app_ingest (browser_events)
-        await sendToControlPlaneAppIngest('browser_events', [record]);
-
-        if (supabase) {
             const { error } = await supabase.from('browserplugin').insert(record);
-            if (error) console.error('[VIDEO_PLAY] Supabase insert error:', error);
-            else console.log('[VIDEO_PLAY] Event logged:', record);
+            if (error) console.error(`[${eventType}] Supabase insert error:`, error);
+        } catch (err) {
+            console.error(`[${eventType}] Unexpected error logging event`, err);
         }
-
-        return; // done handling VIDEO_PLAY
     }
+}
+
+async function handleVideoPlayMessage(msg, sender) {
+    let host;
+    try {
+        host = new URL(msg.url).hostname;
+    } catch {
+        console.warn('Invalid page URL for VIDEO_PLAY:', msg.url);
+        host = null;
+    }
+    if (host && shouldSkipHostname(host)) {
+        console.log('Skipped video_play on domain:', host);
+        return;
+    }
+
+    let tabInfo = {};
+    try {
+        if (sender.tab?.id) {
+            const t = await chrome.tabs.get(sender.tab.id);
+            tabInfo = {
+                tab_id: t.id,
+                window_id: t.windowId,
+                incognito: t.incognito,
+                pinned: t.pinned,
+                audible: t.audible,
+                muted: t.mutedInfo?.muted ?? false,
+                opener_tab_id: t.openerTabId ?? null
+            };
+        }
+    } catch (e) {
+        console.warn('Could not fetch tab info for VIDEO_PLAY', e);
+    }
+
+    const record = {
+        url: msg.url,
+        visited_at: msg.visited_at,
+        title: msg.title,
+        favicon_url: msg.favicon_url,
+        hostname: host,
+        transition_type: 'video_play',
+        device_name: msg.device_name,
+        user_id: msg.user_id,
+        referred_by: msg.referred_by,
+        event_type: 'VIDEO_PLAY',
+        content: msg.content,
+        ...tabInfo
+    };
+
+    await sendToControlPlaneAppIngest('browser_events', [record]);
+
+    if (supabase) {
+        const { error } = await supabase.from('browserplugin').insert(record);
+        if (error) console.error('[VIDEO_PLAY] Supabase insert error:', error);
+    }
+}
+
+async function handleContentScriptMessage(msg, sender) {
+    console.log('[CONTENT_EVENT] Received:', msg.event_type || msg.type, msg.url?.slice?.(0, 80));
+
+    const eventType = msg.event_type || msg.type;
+    if (eventType === 'STAR_PAGE' || msg.type === 'STAR_PAGE') {
+        await handleStarPageMessage(msg, sender);
+        return;
+    }
+    if (eventType === 'click' || eventType === 'highlight') {
+        await handleClickOrHighlightMessage(msg, sender);
+        return;
+    }
+    if (eventType === 'VIDEO_PLAY') {
+        await handleVideoPlayMessage(msg, sender);
+    }
+}
+
+// MV3: return true synchronously so the service worker stays alive until async ingest completes.
+chrome.runtime.onMessage.addListener((msg, sender) => {
+    void handleContentScriptMessage(msg, sender).catch((err) => {
+        console.error('[CONTENT_EVENT] Handler failed:', err);
+    });
+    return true;
 });
 
 // Context menu: Star Site
@@ -712,6 +725,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     const payload = {
         type: 'STAR_PAGE',
+        event_type: 'STAR_PAGE',
         url,
         title: tab.title,
         favicon_url: tab.favIconUrl,
@@ -726,6 +740,5 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         opener_tab_id: tab.openerTabId ?? null
     };
 
-    // Reuse existing STAR_PAGE handler
-    chrome.runtime.sendMessage(payload);
+    await handleStarPageMessage(payload, { tab });
 });
