@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Connect once with <strong>Attach Dialogues</strong>, and visits, stars, and browser events flow into <strong>your</strong> personal Dialogues database. Optionally mirror the same activity to <strong>your own Supabase</strong> project.
+  Connect once with <strong>Attach Dialogues</strong>, and visits, stars, and browser events flow into <strong>your</strong> personal Dialogues database.
 </p>
 
 <p align="center">
@@ -20,14 +20,18 @@
 
 ## Why use it
 
-Most browser tools either lock your data in a vendor cloud or ask you to wire up databases by hand. Dialogues Browser Extension is built for people who want a **personal AI node (Topos)** fed by real browsing signal—without giving a third party a copy of every URL by default.
+Your browser already keeps browsing history. You can search it, scroll it, and reopen old tabs—but it stays **trapped in the browser**: hard to combine with the rest of your life, hard to query as structured data, and not something **your own agents** can reason over.
+
+**Attach Dialogues** sends that activity into **your Topos** as a normal data source. Once it is there, it lives inside the Topos ecosystem—alongside messages, notes, and other streams—so you can search, filter, and build on it like any other signal on your node. Your agents can turn raw visits into **useful signal**: what you researched, what you returned to, what changed over time—not just a list of URLs in a history panel.
 
 | You get | What it means |
 |--------|----------------|
+| **History that works for you** | Browsing becomes structured ingest in your node, not a siloed browser archive. |
+| **Topos-native access** | Query and explore visits in the same place as the rest of your personal data. |
+| **Agent-ready signal** | Your Topos agents can summarize, connect, and act on browsing alongside your other sources. |
 | **One-click attach** | Grant Access through Dialogues—no API keys pasted into the extension for Topos. |
 | **Your database** | Records land in **your** Topos via the Control Plane; content is not held as a shared SaaS browsing log. |
 | **You stay in control** | Revoke anytime in Dialogues → **Sharing → Connected apps**. |
-| **Optional Supabase mirror** | Power users can dual-write to their own `browserplugin` table. |
 | **Skip what you want** | Block domains you do not want recorded (work tools, banks, etc.). |
 
 ---
