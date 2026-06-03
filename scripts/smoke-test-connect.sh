@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke-test browser-plugin Grant Access wiring against Control Plane (PKCE, no client secret).
+# Smoke-test browser-history-plugin Grant Access wiring against Control Plane (PKCE, no client secret).
 #
 # Usage:
 #   CONTROL_PLANE_URL=https://cp.logu3s.com \
@@ -12,7 +12,7 @@ set -euo pipefail
 
 CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-https://cp.logu3s.com}"
 CONTROL_PLANE_URL="${CONTROL_PLANE_URL%/}"
-APP_ID="${APP_ID:-browser-plugin}"
+APP_ID="${APP_ID:-browser-history-plugin}"
 EXTENSION_ID="${EXTENSION_ID:?Set EXTENSION_ID (from chrome://extensions)}"
 ADMIN_KEY="${CONTROL_PLANE_ADMIN_KEY:-}"
 
@@ -72,7 +72,7 @@ else
 fi
 
 if [[ -n "$ADMIN_KEY" ]]; then
-  echo "4) GET /v1/apps/browser-plugin (redirect allowlist)"
+  echo "4) GET /v1/apps/${APP_ID} (redirect allowlist)"
   APP_JSON=$(curl -s -H "Authorization: Bearer ${ADMIN_KEY}" "${CONTROL_PLANE_URL}/v1/apps/${APP_ID}")
   python3 - <<PY
 import json, sys

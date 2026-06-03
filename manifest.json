@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Dialogues Browser Extension",
+  "name": "Dialogues Browser History",
   "version": "3.0.0",
-  "description": "Write browsing activity to your Topos via Dialogues; optionally mirror to your Supabase project.",
+  "description": "Send browsing history to your Topos via Dialogues Grant Access.",
   "permissions": ["identity", "webNavigation", "storage", "tabs", "notifications", "contextMenus"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js", "type": "module" },

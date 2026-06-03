@@ -15,7 +15,7 @@ EXTENSION_ID="${EXTENSION_ID:?Set EXTENSION_ID from chrome://extensions}"
 
 BODY=$(printf '{"extension_id":"%s"}' "$EXTENSION_ID")
 RESP=$(curl -s -w "\n%{http_code}" -X POST \
-  "${CONTROL_PLANE_URL}/v1/apps/browser-plugin/extension-install/redirects" \
+  "${CONTROL_PLANE_URL}/v1/apps/browser-history-plugin/extension-install/redirects" \
   -H "Content-Type: application/json" \
   -d "$BODY")
 

@@ -1,19 +1,23 @@
 <p align="center">
-  <img src="icons/icon-48.png" alt="Dialogues Browser Extension" width="96" height="96" />
+  <img src="icons/icon-48.png" alt="Dialogues Browser History" width="96" height="96" />
 </p>
 
-<h1 align="center">Dialogues Browser Extension</h1>
+<h1 align="center">Dialogues Browser History</h1>
 
 <p align="center">
   <strong>Your browsing history, in your Topos — on your terms.</strong>
 </p>
 
 <p align="center">
-  Connect once with <strong>Attach Dialogues</strong>, and visits, stars, and browser events flow into <strong>your</strong> personal Dialogues database.
+  <a href="https://github.com/DialoguesAi/browser-history-plugin">GitHub</a>
+  ·
+  <code>app_id</code>: <code>browser-history-plugin</code>
+  ·
+  Chrome · Arc · Edge (Chromium) · Manifest V3
 </p>
 
 <p align="center">
-  <em>Chrome · Arc · Edge (Chromium) · Manifest V3</em>
+  Connect once with <strong>Attach Dialogues</strong>, and visits, stars, and browser events flow into <strong>your</strong> personal Dialogues database.
 </p>
 
 ---
@@ -54,8 +58,6 @@ You choose what matters; skip lists keep noise out of your graph.
 
 ```text
   You browse  →  Extension  →  Dialogues Control Plane  →  Your Topos engine
-                     │
-                     └─ (optional) Your Supabase project
 ```
 
 1. **Install** the extension (see below).
@@ -65,19 +67,23 @@ You choose what matters; skip lists keep noise out of your graph.
 
 **Access** lasts until you revoke it. After attach, you typically do not need to reconnect unless you revoke access or clear extension storage.
 
+Registered on Dialogues as app **`browser-history-plugin`** (public PKCE client; no platform secret in the extension).
+
 ---
 
-## Install (from this repo)
+## Install from GitHub
 
-For **GitHub / development** installs (each machine gets its own extension ID):
+```bash
+git clone https://github.com/DialoguesAi/browser-history-plugin.git
+cd browser-history-plugin
+```
 
-1. Open extensions:
-   - **Chrome:** `chrome://extensions`
-   - **Arc:** `arc://extensions`
-   - **Edge:** `edge://extensions`
-2. Turn on **Developer mode**.
-3. Click **Load unpacked** and select this folder (`browser-plugin/`, the one with `manifest.json`).
-4. Pin the extension from the toolbar for quick access to **Options**.
+Each unpacked install gets its own extension ID. **Load unpacked** in Chromium:
+
+1. Open **Chrome** `chrome://extensions`, **Arc** `arc://extensions`, or **Edge** `edge://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select the cloned folder (the directory that contains `manifest.json`).
+4. Pin the extension for quick access to **Options**.
 
 On first open of **Options → Topos**, redirect URIs for your install are registered automatically so Attach can complete.
 
@@ -105,8 +111,6 @@ Topos is the **default path**. Supabase is optional and clearly separate—you n
 - **Revoke is immediate** from the Dialogues UI; the extension stops writing on the next request.
 - **Skip domains** reduce sensitive or low-signal hosts before they leave the browser.
 
-For technical detail on auth and ingest, see the [developer documentation](../topos-website-v2/docs/third-party/THIRD_PARTY_APP_CAPABILITIES.md).
-
 ---
 
 ## Troubleshooting
@@ -116,7 +120,21 @@ For technical detail on auth and ingest, see the [developer documentation](../to
 | Nothing syncing | Confirm **Attach Dialogues** is active on the Topos tab. |
 | Arc blocked attach | Reload the extension; ensure Options completed redirect setup (uses `chromiumapp.org` callback). |
 | 401 / 403 after working | Access may be revoked—reattach, or check **Connected apps** in Dialogues. |
-| Debug logging | `chrome://extensions` → **Dialogues Browser Extension** → **Service worker** → Console (`[NAV]`, `[APP_INGEST]` lines). |
+| Debug logging | `chrome://extensions` → **Dialogues Browser History** → **Service worker** → Console (`[NAV]`, `[APP_INGEST]` lines). |
+
+---
+
+## For developers
+
+This repository is the reference **third-party Chrome extension** for Dialogues Grant Access + `app_ingest`.
+
+| Item | Value |
+|------|--------|
+| Registry `app_id` | `browser-history-plugin` |
+| Auth | `public_pkce` (S256); no `client_secret` in the CRX |
+| Key modules | `lib/grantAccess.js`, `lib/pkce.js`, `lib/registerRedirect.js`, `lib/toposIngest.js` |
+
+Operator registration (Control Plane): register the app with integration profile **chrome_extension** and `client_auth_mode` **public_pkce**, or use your platform’s app registry (App Sheaf) with the same policy.
 
 ---
 
@@ -124,14 +142,10 @@ For technical detail on auth and ingest, see the [developer documentation](../to
 
 Copyright 2026 Dialogues and contributors.
 
-Licensed under the [Apache License, Version 2.0](LICENSE). See [LICENSE](LICENSE) for the full text.
+Licensed under the [Apache License, Version 2.0](LICENSE).
 
 ---
 
 ## Version
 
-**3.0.0** — Dialogues Browser Extension (Manifest V3)
-
-<p align="center">
-  <sub>Dialogues · Topos personal node · <a href="../topos-website-v2/docs/README.md">Documentation</a></sub>
-</p>
+**3.0.0** — Dialogues Browser History (Manifest V3)
