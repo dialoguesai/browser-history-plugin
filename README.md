@@ -120,18 +120,11 @@ For technical detail on auth and ingest, see the [developer documentation](../to
 
 ---
 
-## For developers & integrators
+## License
 
-This repo is the **reference third-party app** (`app_id`: `browser-plugin`) for Grant Access + `app_ingest` on the Dialogues platform.
+Copyright 2026 Dialogues and contributors.
 
-| Resource | Link |
-|----------|------|
-| Integrator walkthrough | [INTEGRATION.md](../topos-website-v2/docs/third-party/INTEGRATION.md) |
-| Full capability map | [THIRD_PARTY_APP_CAPABILITIES.md](../topos-website-v2/docs/third-party/THIRD_PARTY_APP_CAPABILITIES.md) |
-| Release checklist | [RELEASE_CHECKLIST.md](../topos-website-v2/docs/third-party/RELEASE_CHECKLIST.md) |
-| All Phase 2 docs | [topos-website-v2/docs/README.md](../topos-website-v2/docs/README.md) |
-
-Operator registration (one-time): `topos-control-plane/scripts/register_browser_plugin_app.sh`.
+Licensed under the [Apache License, Version 2.0](LICENSE). See [LICENSE](LICENSE) for the full text.
 
 ---
 
