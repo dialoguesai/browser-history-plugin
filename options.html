@@ -3,17 +3,52 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>Extension Settings</title>
+    <title>Dialogues Browser Extension</title>
     <style>
         body {
-            font-family: sans-serif;
+            font-family: system-ui, sans-serif;
             padding: 1rem;
-            max-width: 400px;
+            max-width: 480px;
+            margin: 0 auto;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .tabs button {
+            flex: 1;
+            padding: 0.5rem;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-weight: 500;
+        }
+
+        .tabs button.active {
+            border-bottom-color: #2563eb;
+            color: #2563eb;
+        }
+
+        .panel {
+            display: none;
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        .panel[hidden] {
+            display: none !important;
         }
 
         label {
             display: block;
-            margin-top: 1rem;
+            margin-top: 0.75rem;
         }
 
         input,
@@ -26,74 +61,117 @@
         textarea {
             height: 4em;
         }
+
+        .hint {
+            font-size: 0.85em;
+            color: #555;
+            margin-top: 0.25rem;
+        }
+
+        .status-box {
+            margin-top: 0.75rem;
+            padding: 0.5rem;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+
+        .status-ok {
+            background: #ecfdf5;
+            color: #065f46;
+        }
+
+        .status-warn {
+            background: #fffbeb;
+            color: #92400e;
+        }
+
+        .status-err {
+            background: #fef2f2;
+            color: #991b1b;
+        }
+
+        .row-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .row-actions button.attach {
+            width: 240px;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.4rem;
+        }
     </style>
 </head>
 
 <body>
-    <h1>Settings</h1>
+    <h1>Dialogues Browser Extension</h1>
 
-    <label>
-        Supabase URL:
-        <input id="supabaseUrl" type="text" placeholder="https://xyz.supabase.co" />
-    </label>
+    <nav class="tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" class="active" data-tab="topos" role="tab" aria-selected="true">Topos</button>
+        <button type="button" data-tab="supabase" role="tab" aria-selected="false">Supabase</button>
+        <button type="button" data-tab="general" role="tab" aria-selected="false">General</button>
+    </nav>
 
-    <label>
-        Supabase Anon Key:
-        <input id="anonKey" type="text" placeholder="public-anon-key" />
-    </label>
+    <section id="panel-topos" class="panel active" data-panel="topos" role="tabpanel">
+        <p class="hint">Connect once to write browsing data to <strong>your Topos</strong> via Dialogues Grant Access.</p>
+        <div class="row-actions">
+            <button type="button" id="attachDialogues" class="attach">
+                <img src="https://cp.logu3s.com/static/brand/dialogues_logo_icon.png" alt="" width="16" height="16"
+                    style="background:#fff;border-radius:4px;padding:2px;border:1px solid #d1d5db;" />
+                Attach Dialogues
+            </button>
+            <button type="button" id="detachDialogues" class="attach" style="display:none;">
+                <img src="https://cp.logu3s.com/static/brand/dialogues_logo_icon.png" alt="" width="16" height="16"
+                    style="background:#fff;border-radius:4px;padding:2px;border:1px solid #d1d5db;" />
+                Detach Dialogues
+            </button>
+            <span id="attachStatus"></span>
+        </div>
+        <p class="hint">Revoke access anytime in Topos → Sharing → Connected apps.</p>
+    </section>
 
-    <label>
-        Device Name:
-        <input id="deviceName" type="text" placeholder="e.g. My Laptop" />
-    </label>
+    <section id="panel-supabase" class="panel" data-panel="supabase" role="tabpanel" hidden>
+        <label>
+            Supabase URL
+            <input id="supabaseUrl" type="text" placeholder="https://xyz.supabase.co" />
+        </label>
+        <label>
+            Supabase anon key
+            <input id="anonKey" type="text" placeholder="public anon key" />
+        </label>
+        <p class="hint">Create tables: <code>tables/make_table_browserplugin.sql</code></p>
+    </section>
 
-    <label style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
-        <input id="showStarButton" type="checkbox" />
-        <span>Show on-page Star button</span>
-    </label>
+    <section id="panel-general" class="panel" data-panel="general" role="tabpanel" hidden>
+        <p class="hint"><strong>Grant Access setup</strong> — registers this extension install with Control Plane (once per unpacked ID).</p>
+        <div id="redirectSetupStatus" class="status-box status-warn" style="display:none;"></div>
+        <button type="button" id="retryRedirectSetup" style="display:none;margin-bottom:0.75rem;">Retry redirect setup</button>
+        <label>
+            Device name
+            <input id="deviceName" type="text" placeholder="e.g. My Laptop" />
+        </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;">
+            <input id="showStarButton" type="checkbox" style="width:auto;" />
+            <span>Show on-page Star button</span>
+        </label>
+        <label>
+            Skip domains (one per line)
+            <textarea id="skipList" placeholder="e.g. airtable.com"></textarea>
+        </label>
+    </section>
 
-    <label>
-        Skip Domains (one per line — hostname or full URL; all paths on that host are skipped):
-        <textarea id="skipList" placeholder="e.g. airtable.com or https://app.example.com/dashboard"></textarea>
-    </label>
+    <button type="button" id="save" style="margin-top:1rem;">Save settings</button>
+    <p id="status" style="color:green;visibility:hidden;">Saved!</p>
 
-    <button id="save">Save</button>
-    <p id="status" style="color: green; visibility: hidden;">Saved!</p>
-
-    <h2>Attach Dialogues</h2>
-    <p style="font-size: 0.9em; color: #555;">Connect this plugin to your Dialogues account to also write visits to your Dialogues database (in addition to your own storage above).</p>
-    <label>
-        Dialogues URL (frontend + Control Plane base):
-        <input id="dialoguesUrl" type="text" placeholder="https://cp.logu3s.com" />
-    </label>
-    <label>
-        Dialogues Client Secret (for browser-plugin app exchange):
-        <input id="dialoguesClientSecret" type="password" placeholder="cas_..." autocomplete="off" />
-    </label>
-    <div style="margin-top: 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem;">
-        <button id="attachDialogues" style="width: 220px; display: inline-flex; justify-content: center; align-items: center; gap: 0.4rem;">
-            <img
-                src="https://cp.logu3s.com/static/brand/dialogues_logo_icon.png"
-                alt=""
-                aria-hidden="true"
-                width="16"
-                height="16"
-                style="background: #fff; border-radius: 4px; padding: 2px; border: 1px solid #d1d5db;"
-            />
-            Attach Dialogues
-        </button>
-        <button id="detachDialogues" style="width: 220px; display: none;">Detach</button>
-        <span id="attachStatus" style="font-size: 0.9em;"></span>
-    </div>
-    <div id="debugInfo" style="margin-top: 0.5rem; font-size: 0.8em; color: #666; font-family: monospace; word-break: break-all;"></div>
-    <div id="scriptStatus" style="margin-top: 0.5rem; padding: 0.5rem; background: #f0f0f0; border-radius: 4px; font-size: 0.85em;">
-        <strong>Script status:</strong> <span id="scriptStatusText">Loading...</span>
-    </div>
-
-    <h2>Starred Websites</h2>
+    <h2>Starred websites</h2>
     <div id="starredWebsites"></div>
 
-    <script src="options.js"></script>
+    <script type="module" src="options.js"></script>
 </body>
 
 </html>

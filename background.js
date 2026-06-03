@@ -1,85 +1,37 @@
 console.log('[BACKGROUND] Service worker started');
-// background.js
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+import { getControlPlaneUrl } from './lib/config.js';
+import { buildSkipList, shouldSkipHostname } from './lib/skipDomains.js';
+import { dispatchRecord } from './lib/dispatch.js';
+import { exchangeGrantCode } from './lib/grantAccess.js';
+import { resetSupabaseClient } from './lib/supabaseIngest.js';
+import { registerInstallRedirects } from './lib/registerRedirect.js';
 
-// 1) your built‑in skip list
-const defaultSkipDomains = [
-    'airtable.com',
-    'stripe.network',
-    'js.stripe.com',
-    'accounts.youtube.com',
-    'accounts.google.com',
-    'newassets.hcaptcha.com'
-];
-// const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-let supabase = null;
-// this will end up containing defaultSkipDomains + whatever the user adds
-let skipDomains = [...defaultSkipDomains];
-
-/**
- * Normalize a skip-list line to a hostname. Accepts bare hostnames, full URLs (any path),
- * or host/path without a scheme so all routes on that host match.
- */
-function normalizeSkipDomainEntry(raw) {
-    const s = String(raw ?? '').trim().toLowerCase();
-    if (!s) return null;
-    try {
-        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
-            return new URL(s).hostname.toLowerCase();
-        }
-        let hostPart = s.split('/')[0];
-        if (!hostPart) return null;
-        if (hostPart.startsWith('[')) {
-            const end = hostPart.indexOf(']');
-            return end === -1 ? null : hostPart.slice(1, end).toLowerCase();
-        }
-        if (hostPart.includes(':')) {
-            hostPart = hostPart.split(':')[0];
-        }
-        return hostPart || null;
-    } catch {
-        return null;
-    }
-}
-
-/** True if this page host is skipped (exact host or subdomain of a skip entry). */
-function shouldSkipHostname(hostname) {
-    const host = String(hostname || '').toLowerCase();
-    if (!host) return false;
-    return skipDomains.some((entry) => {
-        const pattern = normalizeSkipDomainEntry(entry);
-        if (!pattern) return false;
-        return host === pattern || host.endsWith('.' + pattern);
-    });
-}
+let skipDomains = buildSkipList([]);
 
 function initFromStorage() {
-    chrome.storage.sync.get({
-        supabaseUrl: '',
-        anonKey: '',
-        skipDomains: []     // user‑added domains
-    }, ({ supabaseUrl, anonKey, skipDomains: userDomains }) => {
-        // re‑init Supabase client if creds are set
-        if (supabaseUrl && anonKey) {
-            supabase = createClient(supabaseUrl, anonKey);
-        } else {
-            supabase = null;
+    chrome.storage.sync.get(
+        {
+            supabaseUrl: '',
+            anonKey: '',
+            skipDomains: [],
+            redirectSetupDone: false
+        },
+        ({ skipDomains: userDomains, redirectSetupDone }) => {
+            resetSupabaseClient();
+            skipDomains = buildSkipList(userDomains);
+            console.log('Effective skip list:', skipDomains);
+            const cp = getControlPlaneUrl();
+            if (cp && !redirectSetupDone) {
+                registerInstallRedirects(cp)
+                    .then(() =>
+                        chrome.storage.sync.set({ redirectSetupDone: true, redirectSetupError: '' })
+                    )
+                    .catch((e) =>
+                        console.warn('[BACKGROUND] Redirect registration:', e?.message || e)
+                    );
+            }
         }
-
-        // merge default + user domains (dedupe by normalized hostname vs defaults)
-        const defaultNorm = new Set(
-            defaultSkipDomains.map(normalizeSkipDomainEntry).filter(Boolean)
-        );
-        skipDomains = [
-            ...defaultSkipDomains,
-            ...userDomains.filter((d) => {
-                const h = normalizeSkipDomainEntry(d);
-                return h && !defaultNorm.has(h);
-            })
-        ];
-        console.log('Effective skip list:', skipDomains);
-    });
+    );
 }
 
 /** Show or hide the "connection expired" (red) badge. Only for 401/403 — user must re-attach. */
@@ -153,54 +105,37 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
 });
 
-/** When Attach Dialogues is active, send records to Control Plane app_ingest. Handles 401/403 (clears token). */
-async function sendToControlPlaneAppIngest(sourceId, records) {
-    const { dialoguesToken, dialoguesResourceId, dialoguesControlPlaneUrl } = await chrome.storage.sync.get({
-        dialoguesToken: '',
-        dialoguesResourceId: '',
-        dialoguesControlPlaneUrl: ''
-    });
-    if (!dialoguesToken || !dialoguesResourceId || !dialoguesControlPlaneUrl) return;
-    const controlPlaneUrl = dialoguesControlPlaneUrl.replace(/\/$/, '');
-    const appIngestUrl = `${controlPlaneUrl}/v1/ingestion/app_ingest`;
-    try {
-        const response = await fetch(appIngestUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${dialoguesToken}`
-            },
-            body: JSON.stringify({
-                resource_id: dialoguesResourceId,
-                source_id: sourceId,
-                records
-            })
+async function applyToposIngestResult(result, sourceId, recordCount = 1) {
+    if (!result || result.reason === 'not_attached') return;
+    if (result.reason === 'auth_expired') {
+        console.warn('[APP_INGEST] Token rejected:', result.status, result.body || '');
+        await setDialoguesErrorBadge(true);
+        chrome.notifications?.create({
+            type: 'basic',
+            iconUrl: 'icons/icon-48.png',
+            title: 'Dialogues Connection Expired',
+            message: 'Please re-attach Dialogues in the extension options.'
         });
-        if (response.status === 401 || response.status === 403) {
-            const errorBody = await response.text();
-            console.warn('[APP_INGEST] Token rejected:', response.status, '— Server says:', errorBody || '(no body)');
-            await setDialoguesErrorBadge(true);
-            await chrome.storage.sync.remove(['dialoguesToken', 'dialoguesResourceId']);
-            chrome.notifications?.create({
-                type: 'basic',
-                iconUrl: 'icons/icon-48.png',
-                title: 'Dialogues Connection Expired',
-                message: 'Please re-attach Dialogues in the extension options.'
-            });
-        } else if (response.status === 502 || response.status === 503) {
-            console.warn('[APP_INGEST] Engine unavailable:', response.status, await response.text());
-            await setDialoguesEngineWarningBadge(true);
-        } else if (!response.ok) {
-            console.error('[APP_INGEST] Failed to send', sourceId, ':', response.status, await response.text());
-            await setDialoguesEngineWarningBadge(true);
-        } else {
-            console.log('[APP_INGEST] Successfully sent', sourceId, `(${records.length} record(s))`, 'to Control Plane');
-            await setDialoguesEngineWarningBadge(false);
-        }
-    } catch (err) {
-        console.error('[APP_INGEST] Error sending', sourceId, 'to Control Plane:', err);
-        await setDialoguesEngineWarningBadge(true);
+        return;
     }
+    if (result.sent) {
+        console.log('[APP_INGEST] Successfully sent', sourceId, `(${recordCount} record(s))`);
+        await setDialoguesEngineWarningBadge(false);
+        return;
+    }
+    console.warn('[APP_INGEST] Topos ingest issue:', sourceId, result);
+    await setDialoguesEngineWarningBadge(true);
+}
+
+async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin' }) {
+    const results = await dispatchRecord({ sourceId, record, supabaseTable });
+    await applyToposIngestResult(results.topos, sourceId);
+    if (results.supabase?.sent) {
+        console.log('[SUPABASE] Logged', sourceId, record.url?.slice?.(0, 60));
+    } else if (results.supabase?.reason === 'insert_error') {
+        console.error('[SUPABASE] insert error:', results.supabase.error);
+    }
+    return results;
 }
 
 const processedGrantRedirectUrls = new Set();
@@ -216,65 +151,40 @@ function closeApprovalTab(tabId) {
 }
 
 async function exchangeGrantCodeInBackground(code, state, tabId) {
-    const base = await new Promise((resolve) => {
-        chrome.storage.sync.get(
-            ['dialoguesUrl', 'dialoguesControlPlaneUrl', 'dialoguesClientSecret', '_grantPendingState'],
-            (items) => resolve(items)
-        );
+    const base = await chrome.storage.sync.get({
+        _grantPendingState: '',
+        _grantPkceVerifier: ''
     });
-    const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
-    const dialoguesClientSecret = (base.dialoguesClientSecret || '').trim();
-    if (!controlPlaneUrl) {
-        console.warn('[BACKGROUND] Missing Control Plane URL; cannot exchange grant code');
+    const controlPlaneUrl = getControlPlaneUrl();
+    if (!controlPlaneUrl || !base._grantPkceVerifier) {
+        console.warn('[BACKGROUND] Missing Control Plane URL or PKCE verifier; cannot exchange');
         return false;
     }
-    if (state && base._grantPendingState && state !== base._grantPendingState) {
-        console.warn('[BACKGROUND] Grant state mismatch; attempting exchange anyway');
-    }
-    const exchangeResp = await fetch(`${controlPlaneUrl}/connect/exchange`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        },
-        body: JSON.stringify({
+    try {
+        const { runToken, resourceId } = await exchangeGrantCode({
+            controlPlaneUrl,
             code,
-            app_id: 'browser-plugin',
-            ...(dialoguesClientSecret ? { client_secret: dialoguesClientSecret } : {})
-        })
-    });
-    const payload = await exchangeResp.json().catch(() => ({}));
-    if (!exchangeResp.ok) {
-        console.warn(
-            '[BACKGROUND] Grant exchange failed:',
-            exchangeResp.status,
-            payload?.error_description || payload?.error || '(no error body)'
-        );
-        return false;
-    }
-    const runToken = String(payload?.plugin_attach_token || payload?.mcp_access_token || '').trim();
-    const resourceId = String(payload?.resource_id || '').trim();
-    if (!runToken || !resourceId) {
-        console.warn('[BACKGROUND] Grant exchange missing token/resource_id');
-        return false;
-    }
-    await setDialoguesErrorBadge(false);
-    await setDialoguesEngineWarningBadge(false);
-    await new Promise((resolve) => {
-        chrome.storage.sync.set({
+            codeVerifier: base._grantPkceVerifier,
+            stateFromUrl: state,
+            expectedState: base._grantPendingState
+        });
+        await setDialoguesErrorBadge(false);
+        await setDialoguesEngineWarningBadge(false);
+        await chrome.storage.sync.set({
             dialoguesToken: runToken,
             dialoguesResourceId: resourceId,
             dialoguesControlPlaneUrl: controlPlaneUrl,
             _grantQueryProcessed: true
-        }, resolve);
-    });
-    await new Promise((resolve) => chrome.storage.sync.remove(['_grantPendingState'], resolve));
-    console.log('[BACKGROUND] ✓ Token/resource_id stored from Grant Access code exchange');
-    closeApprovalTab(tabId);
-    if (chrome.runtime.openOptionsPage) {
-        chrome.runtime.openOptionsPage();
+        });
+        await chrome.storage.sync.remove(['_grantPendingState', '_grantPkceVerifier']);
+        console.log('[BACKGROUND] Token/resource_id stored from Grant Access exchange');
+        closeApprovalTab(tabId);
+        chrome.runtime.openOptionsPage?.();
+        return true;
+    } catch (e) {
+        console.warn('[BACKGROUND] Grant exchange failed:', e?.message || e);
+        return false;
     }
-    return true;
 }
 
 function handleGrantRedirectUrl(url, tabId) {
@@ -306,18 +216,17 @@ function handleGrantRedirectUrl(url, tabId) {
         const resource_id = params.get('resource_id');
         if (access_token && resource_id) {
             console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
-            chrome.storage.sync.get(['dialoguesUrl', 'dialoguesControlPlaneUrl'], async (base) => {
-                const controlPlaneUrl = (base.dialoguesControlPlaneUrl || base.dialoguesUrl || '').replace(/\/$/, '');
+            chrome.storage.sync.get([], async () => {
                 const toSet = {
                     dialoguesToken: access_token,
                     dialoguesResourceId: resource_id,
+                    dialoguesControlPlaneUrl: getControlPlaneUrl(),
                     _redirectHashProcessed: true
                 };
-                if (controlPlaneUrl) toSet.dialoguesControlPlaneUrl = controlPlaneUrl;
                 await setDialoguesErrorBadge(false);
                 await setDialoguesEngineWarningBadge(false);
                 chrome.storage.sync.set(toSet, () => {
-                    console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect; control plane URL:', controlPlaneUrl || '(not set – set Dialogues URL in Options and re-attach)');
+                    console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect');
                     closeApprovalTab(tabId);
                 });
             });
@@ -391,78 +300,10 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
         referred_by: null
     };
 
-    // ─── Sprint 3: Check if "Attach Dialogues" is active ────────────────────────
-    const { dialoguesToken, dialoguesResourceId, dialoguesControlPlaneUrl } = await chrome.storage.sync.get({
-        dialoguesToken: '',
-        dialoguesResourceId: '',
-        dialoguesControlPlaneUrl: ''
-    });
-
-    if (dialoguesToken && dialoguesResourceId && dialoguesControlPlaneUrl) {
-        // "Attach Dialogues" is active - send to Control Plane app_ingest
-        const controlPlaneUrl = dialoguesControlPlaneUrl.replace(/\/$/, '');
-        const appIngestUrl = `${controlPlaneUrl}/v1/ingestion/app_ingest`;
-        console.log('[APP_INGEST] Sending to Control Plane:', appIngestUrl);
-        try {
-            const response = await fetch(appIngestUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${dialoguesToken}`
-                },
-                body: JSON.stringify({
-                    resource_id: dialoguesResourceId,
-                    source_id: 'browser_visits',
-                    records: [record]
-                })
-            });
-
-            if (response.status === 401 || response.status === 403) {
-                const errorBody = await response.text();
-                console.warn('[APP_INGEST] Token rejected:', response.status, '— Server says:', errorBody || '(no body)');
-                await setDialoguesErrorBadge(true);
-                await chrome.storage.sync.remove(['dialoguesToken', 'dialoguesResourceId']);
-                chrome.notifications?.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon-48.png',
-                    title: 'Dialogues Connection Expired',
-                    message: 'Please re-attach Dialogues in the extension options.'
-                });
-            } else if (response.status === 502 || response.status === 503 || !response.ok) {
-                const errorText = await response.text();
-                console.warn('[APP_INGEST] Engine unavailable:', response.status, errorText || '(no body)');
-                await setDialoguesEngineWarningBadge(true);
-            } else {
-                console.log('[APP_INGEST] Successfully sent visit to Control Plane');
-                await setDialoguesEngineWarningBadge(false);
-            }
-        } catch (err) {
-            console.error('[APP_INGEST] Error sending visit to Control Plane:', err);
-            await setDialoguesEngineWarningBadge(true);
-        }
-    } else {
-        // So you can see why no request is sent (check Service Worker console)
-        if (!dialoguesToken) console.log('[APP_INGEST] Not sending: no dialoguesToken (Attach Dialogues not done or cleared)');
-        else if (!dialoguesResourceId) console.log('[APP_INGEST] Not sending: no dialoguesResourceId');
-        else if (!dialoguesControlPlaneUrl) console.log('[APP_INGEST] Not sending: no dialoguesControlPlaneUrl');
-    }
-
-    // ─── Also insert into Supabase if configured (for backward compatibility) ───
-    if (supabase) {
-        try {
-            const { error } = await supabase
-                .from('browserplugin')
-                .insert(record);
-
-            if (error) console.error('Supabase insert error:', error);
-            else console.log('Logged visit to Supabase:', record);
-        } catch (err) {
-            console.error('Unexpected error logging visit to Supabase', err);
-        }
-    } else if (!dialoguesToken) {
-        console.warn(
-            '[APP_INGEST] Neither Supabase nor Dialogues configured; skipping insert. ' +
-            'To use Dialogues: open extension Options → set "Dialogues URL" (e.g. https://cp.logu3s.com) → click "Attach Dialogues" and complete the consent flow.'
+    const results = await ingestRecord({ sourceId: 'browser_visits', record });
+    if (!results.topos?.sent && !results.supabase?.sent) {
+        console.log(
+            '[APP_INGEST] No sink configured — attach Dialogues (Topos tab) and/or set Supabase in Options.'
         );
     }
 });
@@ -504,15 +345,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
             referred_by: null
         };
 
-        // When Attach Dialogues is active, send tab switch as a visit (so "going back to a tab" counts)
-        await sendToControlPlaneAppIngest('browser_visits', [record]);
-
-        // Insert into Supabase if configured
-        if (supabase) {
-            const { error } = await supabase.from('browserplugin').insert(record);
-            if (error) console.error('Supabase insert error (tab activated):', error);
-            else console.log('Logged tab activation:', record);
-        }
+        await ingestRecord({ sourceId: 'browser_visits', record });
     } catch (err) {
         console.error('Error handling tab activation', err);
     }
@@ -561,18 +394,7 @@ async function handleStarPageMessage(msg, sender) {
         event_type: 'star_page'
     };
 
-    await sendToControlPlaneAppIngest('browser_events', [record]);
-
-    if (supabase) {
-        try {
-            const result = await supabase.from('starred_websites').insert(record);
-            if (result.error) {
-                console.error('[STAR_PAGE] Supabase star insert error:', result.error);
-            }
-        } catch (err) {
-            console.error('[STAR_PAGE] Unexpected error starring website', err);
-        }
-    }
+    await ingestRecord({ sourceId: 'starred_websites', record, supabaseTable: 'starred_websites' });
 }
 
 async function handleClickOrHighlightMessage(msg, sender) {
@@ -610,16 +432,7 @@ async function handleClickOrHighlightMessage(msg, sender) {
         ...tabInfo
     };
 
-    await sendToControlPlaneAppIngest('browser_events', [record]);
-
-    if (supabase) {
-        try {
-            const { error } = await supabase.from('browserplugin').insert(record);
-            if (error) console.error(`[${eventType}] Supabase insert error:`, error);
-        } catch (err) {
-            console.error(`[${eventType}] Unexpected error logging event`, err);
-        }
-    }
+    await ingestRecord({ sourceId: 'browser_events', record });
 }
 
 async function handleVideoPlayMessage(msg, sender) {
@@ -668,12 +481,7 @@ async function handleVideoPlayMessage(msg, sender) {
         ...tabInfo
     };
 
-    await sendToControlPlaneAppIngest('browser_events', [record]);
-
-    if (supabase) {
-        const { error } = await supabase.from('browserplugin').insert(record);
-        if (error) console.error('[VIDEO_PLAY] Supabase insert error:', error);
-    }
+    await ingestRecord({ sourceId: 'browser_events', record });
 }
 
 async function handleContentScriptMessage(msg, sender) {

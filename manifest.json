@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "URL Logger to Supabase",
-  "version": "2.0.0",
-  "description": "Logs every visited URL into a Supabase table",
+  "name": "Dialogues Browser Extension",
+  "version": "3.0.0",
+  "description": "Write browsing activity to your Topos via Dialogues; optionally mirror to your Supabase project.",
   "permissions": ["identity", "webNavigation", "storage", "tabs", "notifications", "contextMenus"],
   "host_permissions": ["<all_urls>"],
-  "background": {"service_worker": "background.js", "type": "module"},
+  "background": { "service_worker": "background.js", "type": "module" },
   "options_page": "options.html",
-  "icons": {"48": "icons/icon-48.png"},
-  "action": {"default_icon": {"48": "icons/icon-48.png"}},
-  "content_scripts": [{"matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle"}]
+  "icons": { "48": "icons/icon-48.png" },
+  "action": { "default_icon": { "48": "icons/icon-48.png" } },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle" }]
 }

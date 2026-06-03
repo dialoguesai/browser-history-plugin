@@ -1,6 +1,6 @@
-# Browser Plugin
+# Dialogues Browser Extension
 
-This is meant to be a plugin to submit Browsing data to one's Topos.
+Reference third-party app: write browsing activity to **your Topos** via Grant Access. Optionally mirror to **your Supabase** project.
 
 ## Loading the extension (Chrome / Arc / Edge)
 
@@ -12,14 +12,14 @@ This is meant to be a plugin to submit Browsing data to one's Topos.
 3. Click **Load unpacked** and select this folder (`browser-plugin/` — the one that contains `manifest.json`).
 4. Optional: pin the extension from the toolbar or Site Controls menu so Options is easy to reach.
 
-Each unpacked install gets a **unique extension ID**. You must register that ID with Control Plane before **Attach Dialogues** will work (see below).
+Each unpacked install gets a **unique extension ID**. Redirect URIs are registered **automatically** when you open Options (see below).
 
 ## Where to see extension logs (one place for all tabs)
 
 You do **not** need to open the console on every new tab or page. The code that sends visits runs in the **extension’s background (service worker)**. Use a single console for all activity:
 
 1. Open **`chrome://extensions`** or **`arc://extensions`**
-2. Find **URL Logger / Dialogues Browser Extension**
+2. Find **Dialogues Browser Extension**
 3. Click **“Service worker”** (or “Inspect views: background page”)  
    → DevTools opens for the **background script**
 4. In that console you’ll see:
@@ -39,75 +39,32 @@ The plugin is registered in the Control Plane **app registry** as a first-party 
 
 One-time app registration (creates the app row only) is done via script in the Control Plane repo: `scripts/register_browser_plugin_app.sh` (requires `CONTROL_PLANE_URL` and `CONTROL_PLANE_ADMIN_KEY`).
 
-### Register your redirect URI (required for each local install)
+### Redirect URI setup (automatic)
 
-**Attach Dialogues** sends users through Control Plane OAuth with a callback to your extension's Options page. Control Plane only accepts redirect URIs that are explicitly allowlisted for the app.
+**Attach Dialogues** uses OAuth with a callback to this extension. Control Plane only allows registered redirect URIs.
 
-When you **Load unpacked**, the browser assigns an extension ID that is unique to that install (and to the folder path). A redirect URI registered for someone else's Chrome install will **not** work on your Arc or dev Chrome install.
+**Default (no admin key):** Open **Options → Topos**. The extension calls:
 
-#### 1. Find your extension ID and redirect URIs
-
-On `chrome://extensions` or `arc://extensions`, find **URL Logger to Supabase** and copy the **ID** (32 lowercase letters), e.g. `nhchpdllklekegfalgklbeedainhjjif`.
-
-Register **both** of these redirect URIs for your install:
+`POST /v1/apps/browser-plugin/extension-install/redirects` with your `chrome.runtime.id` and registers:
 
 ```text
 chrome-extension://<YOUR_EXTENSION_ID>/options.html
 https://<YOUR_EXTENSION_ID>.chromiumapp.org/
 ```
 
-The `chromiumapp.org` URI is used by **Attach Dialogues** via `chrome.identity.launchWebAuthFlow` (required on **Arc**, which blocks top-level navigation to `chrome-extension://` after OAuth with `ERR_BLOCKED_BY_CLIENT`).
+The `chromiumapp.org` URI is required on **Arc** (`chrome.identity.launchWebAuthFlow`).
 
-You can confirm the active `redirect_uri` in the Options page DevTools console after clicking **Attach Dialogues** — the plugin logs the full `/connect` URL.
-
-#### 2. Add the redirect URI to Control Plane
-
-Requires `CONTROL_PLANE_ADMIN_KEY` and access to `PATCH /v1/apps/browser-plugin`.
-
-**First, fetch existing URIs** so you don't remove other developers' installs:
+**Fallback (script):**
 
 ```bash
-export CONTROL_PLANE_URL="https://cp.logu3s.com"   # or http://localhost:8000 for local CP
-export CONTROL_PLANE_ADMIN_KEY="your-admin-key"
-
-curl -s -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}" \
-  "${CONTROL_PLANE_URL}/v1/apps/browser-plugin" | jq '.metadata.allowed_redirect_uris'
+CONTROL_PLANE_URL=https://cp.logu3s.com EXTENSION_ID=your32charid ./scripts/register-redirect.sh
 ```
 
-**Then PATCH** — this merges your URI into the existing list without removing other installs:
+If redirect setup fails, use **Retry redirect setup** in Options or check that the `browser-plugin` app exists on Control Plane.
 
-```bash
-export EXTENSION_ID="YOUR_EXTENSION_ID"
-export REDIRECT_OPTIONS="chrome-extension://${EXTENSION_ID}/options.html"
-export REDIRECT_CHROMIUM="https://${EXTENSION_ID}.chromiumapp.org/"
+**Operator one-time:** `topos-control-plane/scripts/register_browser_plugin_app.sh` creates the app row. Set `client_auth_mode` to `public_pkce` for this reference build (no client secret in the extension).
 
-curl -s -X PATCH "${CONTROL_PLANE_URL}/v1/apps/browser-plugin" \
-  -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "$(curl -s -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}" \
-    "${CONTROL_PLANE_URL}/v1/apps/browser-plugin" \
-    | jq --arg a "$REDIRECT_OPTIONS" --arg b "$REDIRECT_CHROMIUM" \
-      '.metadata.allowed_redirect_uris += [$a, $b] | {allowed_redirect_uris: .metadata.allowed_redirect_uris | unique}')"
-```
-
-On success, `allowed_redirect_uris` in the response should include both URIs.
-
-After changing extension code, **reload the extension** on `arc://extensions` (click the reload icon) so the new `identity` permission and Arc-safe attach flow take effect.
-
-If attach fails with **`invalid_redirect_uri`** or **"redirect_uri is not registered for this app"**, this step was skipped or the wrong ID was used.
-
-#### 3. Set the client secret in Options
-
-The `browser-plugin` app uses **`client_secret_required`** mode. Paste the app client secret (`cas_...`) into **Dialogues Client Secret** on the extension Options page before attaching. Without it, `/connect/exchange` fails after login.
-
-To issue or rotate a secret (admin only):
-
-```bash
-curl -s -X POST "${CONTROL_PLANE_URL}/v1/apps/browser-plugin/client-auth/issue" \
-  -H "Authorization: Bearer ${CONTROL_PLANE_ADMIN_KEY}"
-```
-
-The response includes `client_secret` once — store it securely and enter it in Options.
+Integrators: see [topos-website-v2/docs/third-party/INTEGRATION.md](../topos-website-v2/docs/third-party/INTEGRATION.md) and [THIRD_PARTY_APP_CAPABILITIES.md](../topos-website-v2/docs/third-party/THIRD_PARTY_APP_CAPABILITIES.md).
 
 ---
 
@@ -117,14 +74,13 @@ The response includes `client_secret` once — store it securely and enter it in
 
 The plugin uses the universal Grant Access flow via `GET /connect` + one-time code exchange at `POST /connect/exchange`.
 
-> Client auth note: the app `browser-plugin` now uses `client_secret_required` mode. Set the app secret in Options as **Dialogues Client Secret** so the extension can include it during code exchange.
-
 ### How It Works
 
-1. **User clicks Attach Dialogues (Grant Access)** in the plugin Options page.
-2. **Consent flow:** User is redirected to Control Plane `GET /connect` with `app_id`, `redirect_uri`, `source_id`, and `scopes`.
-3. **One-time code callback:** Control Plane redirects back to plugin options with `?code=...`.
-4. **Exchange:** Plugin calls `POST /connect/exchange` with `code`, `app_id`, and `client_secret`, then receives token artifact + `resource_id`.
+1. **User opens Options** — redirect URIs auto-register for this install.
+2. **User clicks Attach Dialogues** on the **Topos** tab.
+3. **Consent:** `GET /connect` with PKCE (`code_challenge` / `code_verifier`).
+4. **Callback:** Control Plane redirects with `?code=...`.
+5. **Exchange:** `POST /connect/exchange` with `code`, `app_id`, `code_verifier` (no client secret).
 5. **Plugin stores credentials:** Token and resource_id are saved in `chrome.storage.sync`.
 6. **Automatic data sync:** When attached, plugin sends browsing data to Control Plane via `POST /v1/ingestion/app_ingest`.
 
@@ -162,7 +118,7 @@ When "Attach Dialogues" is active, the plugin sends the following data to the Co
 ### Error Handling
 
 - **Arc: `ERR_BLOCKED_BY_CLIENT` / "blocked by Arc" on extension ID:** Arc blocks OAuth callbacks that navigate a normal tab to `chrome-extension://...`. Reload the extension (uses `chrome.identity.launchWebAuthFlow` instead) and ensure `https://<YOUR_EXTENSION_ID>.chromiumapp.org/` is registered (see **Register your redirect URI** above).
-- **401/403 errors:** If the token expires or is revoked, the plugin will show an error badge and stop sending data. If the token keeps expiring soon after attach, see **Token goes inactive** in `app_registry_sprints/CONNECT_APP_FLOW.md` (set Keycloak Access Token Lifespan = 365 days on the resource server client).
+- **401/403 errors:** If the token expires or is revoked, the plugin will show an error badge and stop sending data. If the token keeps expiring soon after attach, see **Token goes inactive** in [CONNECT_APP_FLOW.md](../topos-website-v2/docs/control-plane/CONNECT_APP_FLOW.md) (set Keycloak Access Token Lifespan = 365 days on the resource server client).
 - **Re-attach required:** If you see connection errors, try clicking "Attach Dialogues" again to get a new token
 - **Check logs:** Use the Service worker console (see above) to see detailed error messages
 
