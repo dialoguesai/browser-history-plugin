@@ -1,5 +1,14 @@
-import { getControlPlaneUrl } from './lib/config.js';
-import { buildGrantConnectUrl, exchangeGrantCode, getGrantRedirectUri } from './lib/grantAccess.js';
+import {
+    getControlPlaneUrl,
+    DIALOGUES_CONNECT_APP_ID,
+    DIALOGUES_CONNECT_SETUP_KEY
+} from './lib/config.js';
+import {
+    buildGrantConnectUrl,
+    exchangeGrantCode,
+    getGrantRedirectUri,
+    preflightGrantConnect
+} from './lib/grantAccess.js';
 import { registerInstallRedirects, redirectUrisForThisInstall } from './lib/registerRedirect.js';
 
 const urlInput = document.getElementById('supabaseUrl');
@@ -74,12 +83,37 @@ function showRedirectSetup(message, kind = 'warn') {
     redirectSetupStatus.className = `status-box status-${kind}`;
 }
 
-async function ensureRedirectRegistration(controlPlaneUrl, { isAttached = false } = {}) {
-    const { redirectSetupDone, redirectSetupSkippedApi } = await chrome.storage.sync.get({
+function redirectSetupNeedsRefresh(stored) {
+    const extensionId = chrome.runtime.id;
+    if (stored.connectSetupKey && stored.connectSetupKey !== DIALOGUES_CONNECT_SETUP_KEY) {
+        return true;
+    }
+    if (stored.registeredExtensionId && stored.registeredExtensionId !== extensionId) {
+        return true;
+    }
+    return false;
+}
+
+async function ensureRedirectRegistration(controlPlaneUrl, { isAttached = false, force = false } = {}) {
+    const stored = await chrome.storage.sync.get({
         redirectSetupDone: false,
-        redirectSetupSkippedApi: false
+        redirectSetupSkippedApi: false,
+        registeredExtensionId: '',
+        connectSetupKey: ''
     });
-    if (redirectSetupDone || redirectSetupSkippedApi) {
+    if (!force && redirectSetupNeedsRefresh(stored)) {
+        await chrome.storage.sync.remove([
+            'redirectSetupDone',
+            'redirectSetupSkippedApi',
+            'redirectSetupError',
+            'registeredExtensionId',
+            'connectSetupKey'
+        ]);
+        stored.redirectSetupDone = false;
+        stored.redirectSetupSkippedApi = false;
+    }
+    const { redirectSetupDone, redirectSetupSkippedApi } = stored;
+    if (!force && (redirectSetupDone || redirectSetupSkippedApi)) {
         if (redirectSetupSkippedApi && isAttached) {
             showRedirectSetup(
                 'Redirect setup pending on server update. Attach still works if URIs were registered when you connected.',
@@ -99,7 +133,9 @@ async function ensureRedirectRegistration(controlPlaneUrl, { isAttached = false 
             redirectSetupDone: true,
             redirectSetupError: '',
             redirectSetupSkippedApi: false,
-            registeredExtensionId: result.extensionId
+            registeredExtensionId: result.extensionId,
+            connectSetupKey: DIALOGUES_CONNECT_SETUP_KEY,
+            connectAppId: DIALOGUES_CONNECT_APP_ID
         });
         redirectSetupStatus.style.display = 'none';
         retryRedirectSetupBtn.style.display = 'none';
@@ -204,13 +240,23 @@ attachDialoguesBtn.addEventListener('click', async () => {
         dialoguesResourceId: ''
     });
     const alreadyAttached = !!(dialoguesToken && dialoguesResourceId);
-    const ok = await ensureRedirectRegistration(base, { isAttached: alreadyAttached });
+    const ok = await ensureRedirectRegistration(base, { isAttached: alreadyAttached, force: true });
     if (!ok) {
         setAttachStatus('Fix redirect setup first, or use register-redirect.sh, then try again.', 'red');
         return;
     }
     try {
         const { url, pendingState, codeVerifier } = await buildGrantConnectUrl(base, { forceLogin: true });
+        try {
+            await preflightGrantConnect(url);
+        } catch (preflightErr) {
+            const hint =
+                String(preflightErr?.message || preflightErr).includes('redirect_uri')
+                    ? ' Click “Retry redirect setup” or reload the extension, then try again.'
+                    : '';
+            setAttachStatus(`Cannot start attach: ${preflightErr?.message || preflightErr}${hint}`, 'red');
+            return;
+        }
         await chrome.storage.sync.set({
             _grantPendingState: pendingState,
             _grantPkceVerifier: codeVerifier
