@@ -69,6 +69,12 @@ You choose what matters; skip lists keep noise out of your graph.
 
 Registered on Dialogues as app **`browser-history-plugin`** (public PKCE client; no platform secret in the extension).
 
+### Build your own third-party app
+
+Step-by-step integrator tutorials (register app → Dialogues auth → extension reference):
+
+**https://topos.dialogues.ai/docs** (local dev: `topos-website-v2` → `/docs`)
+
 ---
 
 ## Install from GitHub
@@ -148,4 +154,4 @@ Licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Version
 
-**3.0.0** — Dialogues Browser History (Manifest V3)
+**3.0.2** — Dialogues Browser History (Manifest V3)
