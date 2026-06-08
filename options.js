@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         anonKey: '',
         skipDomains: [],
         device_name: '',
-        showStarButton: true,
+        showStarButton: false,
         dialoguesToken: '',
         dialoguesResourceId: ''
     });
@@ -388,7 +388,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     keyInput.value = items.anonKey;
     listInput.value = (items.skipDomains || []).join('\n');
     deviceNameInput.value = items.device_name || '';
-    showStarButtonInput.checked = items.showStarButton !== false;
+    showStarButtonInput.checked = items.showStarButton === true;
     updateAttachUI(items);
     chrome.storage.sync.remove(['dialoguesClientSecret', 'dialoguesUrl']);
     const cpUrl = getControlPlaneUrl();

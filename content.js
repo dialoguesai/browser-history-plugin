@@ -105,7 +105,7 @@ async function maybeInjectStarButton() {
             console.warn('[CONTENT] Extension context invalidated, skipping star button');
             return;
         }
-        const { showStarButton = true } = await chrome.storage.sync.get({ showStarButton: true });
+        const { showStarButton = false } = await chrome.storage.sync.get({ showStarButton: false });
         if (!showStarButton) return;
         window.__starButtonInjected = true;
     } catch (err) {
