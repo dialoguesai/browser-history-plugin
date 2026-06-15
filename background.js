@@ -257,7 +257,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     try { hostname = new URL(url).hostname; }
     catch { return; }
 
-    if (shouldSkipHostname(hostname)) {
+    if (shouldSkipHostname(hostname, skipDomains)) {
         console.log(`[NAV] Skipped domain: ${hostname}`);
         return;
     }
@@ -318,7 +318,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         let hostname;
         try { hostname = new URL(tab.url).hostname; }
         catch { return; }
-        if (shouldSkipHostname(hostname)) {
+        if (shouldSkipHostname(hostname, skipDomains)) {
             console.log(`Skipped domain on tab activation: ${hostname}`);
             return;
         }
@@ -443,7 +443,7 @@ async function handleVideoPlayMessage(msg, sender) {
         console.warn('Invalid page URL for VIDEO_PLAY:', msg.url);
         host = null;
     }
-    if (host && shouldSkipHostname(host)) {
+    if (host && shouldSkipHostname(host, skipDomains)) {
         console.log('Skipped video_play on domain:', host);
         return;
     }
@@ -501,11 +501,14 @@ async function handleContentScriptMessage(msg, sender) {
     }
 }
 
-// MV3: return true synchronously so the service worker stays alive until async ingest completes.
-chrome.runtime.onMessage.addListener((msg, sender) => {
-    void handleContentScriptMessage(msg, sender).catch((err) => {
-        console.error('[CONTENT_EVENT] Handler failed:', err);
-    });
+// MV3: return true so the worker stays alive until async ingest completes; must call sendResponse.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    handleContentScriptMessage(msg, sender)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => {
+            console.error('[CONTENT_EVENT] Handler failed:', err);
+            sendResponse({ ok: false });
+        });
     return true;
 });
 

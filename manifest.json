@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dialogues Browser History",
-  "version": "3.0.2",
+  "version": "3.0.4",
   "description": "Send browsing history to your Topos via Dialogues Grant Access.",
   "permissions": ["identity", "webNavigation", "storage", "tabs", "notifications", "contextMenus"],
   "host_permissions": ["<all_urls>"],
@@ -9,5 +9,5 @@
   "options_page": "options.html",
   "icons": { "48": "icons/icon-48.png" },
   "action": { "default_icon": { "48": "icons/icon-48.png" } },
-  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle" }]
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle", "type": "module" }]
 }

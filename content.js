@@ -1,5 +1,4 @@
-// content.js
-console.log('[CONTENT] Content script injected and running');
+import { shouldSkipInteraction } from './lib/skipDomains.js';
 
 /**
  * Read user prefs from storage
@@ -7,9 +6,7 @@ console.log('[CONTENT] Content script injected and running');
 function getPrefs() {
     return new Promise(resolve => {
         try {
-            // Check if extension context is still valid
             if (!chrome.runtime?.id) {
-                console.warn('[CONTENT] Extension context invalidated, using defaults');
                 resolve({
                     device_name: '',
                     user_id: null,
@@ -26,7 +23,6 @@ function getPrefs() {
                 prefs => resolve(prefs)
             );
         } catch (err) {
-            console.warn('[CONTENT] Error reading storage (extension may have reloaded):', err);
             resolve({
                 device_name: '',
                 user_id: null,
@@ -36,9 +32,6 @@ function getPrefs() {
     });
 }
 
-/**
- * Collects the fields content scripts can see
- */
 function getPageMeta() {
     return {
         url: location.href,
@@ -49,67 +42,43 @@ function getPageMeta() {
     };
 }
 
-/**
- * Sends a rich message with whatever metadata we can gather here.
- * Background.js will supplement tab_id, window_id, incognito, etc.
- */
 async function sendRichMessage(eventType, transitionType, contentObj = {}, extras = {}) {
     try {
-        // Check if extension context is still valid
-        if (!chrome.runtime?.id) {
-            console.warn('[CONTENT] Extension context invalidated, skipping message send');
-            return;
-        }
+        if (!chrome.runtime?.id) return;
         const prefs = await getPrefs();
         const meta = getPageMeta();
 
         chrome.runtime.sendMessage({
             event_type: eventType,
-            type: eventType,       // so your listener can still use msg.type
+            type: eventType,
             transition_type: transitionType,
             ...meta,
             ...prefs,
             ...extras,
             content: contentObj
-        }, (response) => {
-            // Handle response or errors silently
-            if (chrome.runtime.lastError) {
-                console.warn('[CONTENT] Message send error:', chrome.runtime.lastError.message);
-            }
         });
     } catch (err) {
         console.warn('[CONTENT] Error sending message (extension may have reloaded):', err);
     }
 }
 
+function initVideoPlayTracking() {
+    document.addEventListener('play', e => {
+        const v = e.target;
+        if (v.tagName === 'VIDEO' && v.currentSrc) {
+            sendRichMessage('VIDEO_PLAY', 'video_play', { videoUrl: v.currentSrc });
+        }
+    }, true);
+}
 
-/**
- * 1) VIDEO_PLAY event
- */
-document.addEventListener('play', e => {
-    const v = e.target;
-    if (v.tagName === 'VIDEO' && v.currentSrc) {
-        sendRichMessage('VIDEO_PLAY', 'video_play', { videoUrl: v.currentSrc });
-    }
-}, true);
-
-
-/**
- * 2) STAR_PAGE (⭐ button)
- */
 async function maybeInjectStarButton() {
     if (window.__starButtonInjected) return;
     try {
-        // Check if extension context is still valid
-        if (!chrome.runtime?.id) {
-            console.warn('[CONTENT] Extension context invalidated, skipping star button');
-            return;
-        }
+        if (!chrome.runtime?.id) return;
         const { showStarButton = false } = await chrome.storage.sync.get({ showStarButton: false });
         if (!showStarButton) return;
         window.__starButtonInjected = true;
-    } catch (err) {
-        console.warn('[CONTENT] Error reading showStarButton (extension may have reloaded):', err);
+    } catch {
         return;
     }
 
@@ -143,10 +112,10 @@ async function maybeInjectStarButton() {
     document.body.appendChild(btn);
 }
 
-// Initial check and also listen for runtime config changes
-maybeInjectStarButton();
-try {
-    if (chrome.runtime?.id) {
+function initStarButtonWatcher() {
+    maybeInjectStarButton();
+    try {
+        if (!chrome.runtime?.id) return;
         chrome.storage.onChanged.addListener((changes, area) => {
             if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, 'showStarButton')) {
                 if (changes.showStarButton.newValue === false) {
@@ -158,17 +127,16 @@ try {
                 }
             }
         });
+    } catch (err) {
+        console.warn('[CONTENT] Error setting up storage listener:', err);
     }
-} catch (err) {
-    console.warn('[CONTENT] Error setting up storage listener:', err);
 }
 
-/**
- * 3) Click Tracking
- */
-(function clickTracker() {
-    const DEBOUNCE = 500, LIMIT = 100;
-    let lastTime = 0, count = 0;
+function initClickTracking() {
+    const DEBOUNCE = 500;
+    const LIMIT = 100;
+    let lastTime = 0;
+    let count = 0;
 
     function selector(el) {
         if (!el) return '';
@@ -183,27 +151,21 @@ try {
         const now = Date.now();
         if (now - lastTime < DEBOUNCE) return;
         if (count >= LIMIT) return;
-        lastTime = now; count++;
+        lastTime = now;
+        count++;
 
-        await sendRichMessage(
-            'click',
-            'click',
-            {
-                x: e.clientX,
-                y: e.clientY,
-                element: selector(e.target),
-                timestamp: new Date().toISOString()
-            }
-        );
+        await sendRichMessage('click', 'click', {
+            x: e.clientX,
+            y: e.clientY,
+            element: selector(e.target),
+            timestamp: new Date().toISOString()
+        });
     }
 
     document.addEventListener('click', onClick, true);
-})();
+}
 
-/**
- * 4) Highlight (Text Selection) Tracking
- */
-(function highlightTracker() {
+function initHighlightTracking() {
     function anchorTag(sel) {
         const node = sel.anchorNode;
         const el = node?.nodeType === 1 ? node : node?.parentElement;
@@ -216,15 +178,11 @@ try {
         const txt = sel.toString().trim();
         if (!txt) return;
 
-        await sendRichMessage(
-            'highlight',
-            'highlight',
-            {
-                selectedText: txt,
-                anchorNode: anchorTag(sel),
-                timestamp: new Date().toISOString()
-            }
-        );
+        await sendRichMessage('highlight', 'highlight', {
+            selectedText: txt,
+            anchorNode: anchorTag(sel),
+            timestamp: new Date().toISOString()
+        });
     }
 
     document.addEventListener('mouseup', onSelect, false);
@@ -233,4 +191,19 @@ try {
             onSelect();
         }
     }, false);
-})();
+}
+
+function initInteractionTracking() {
+    initVideoPlayTracking();
+    initClickTracking();
+    initHighlightTracking();
+}
+
+const skipInteraction = shouldSkipInteraction(location.hostname);
+if (skipInteraction) {
+    console.log('[CONTENT] Visit logging only on conferencing host:', location.hostname);
+} else {
+    initInteractionTracking();
+}
+
+initStarButtonWatcher();
