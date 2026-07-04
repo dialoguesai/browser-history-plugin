@@ -7,6 +7,8 @@ import { resetSupabaseClient } from './lib/supabaseIngest.js';
 import { registerInstallRedirects } from './lib/registerRedirect.js';
 
 let skipDomains = buildSkipList([]);
+/** Consecutive Topos ingest failures; badge only latches after several (success always resets). */
+let toposIngestFailureStreak = 0;
 
 function initFromStorage() {
     chrome.storage.sync.get(
@@ -14,13 +16,17 @@ function initFromStorage() {
             supabaseUrl: '',
             anonKey: '',
             skipDomains: [],
-            redirectSetupDone: false
+            redirectSetupDone: false,
+            dialoguesControlPlaneUrl: ''
         },
-        ({ skipDomains: userDomains, redirectSetupDone }) => {
+        ({ skipDomains: userDomains, redirectSetupDone, dialoguesControlPlaneUrl }) => {
             resetSupabaseClient();
             skipDomains = buildSkipList(userDomains);
             console.log('Effective skip list:', skipDomains);
             const cp = getControlPlaneUrl();
+            if (cp && !dialoguesControlPlaneUrl) {
+                chrome.storage.sync.set({ dialoguesControlPlaneUrl: cp });
+            }
             if (cp && !redirectSetupDone) {
                 registerInstallRedirects(cp)
                     .then(() =>
@@ -106,8 +112,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 async function applyToposIngestResult(result, sourceId, recordCount = 1) {
-    if (!result || result.reason === 'not_attached') return;
+    if (!result) return;
+    if (result.reason === 'not_attached') {
+        // Do not leave a stale yellow badge when Topos is no longer configured.
+        await setDialoguesEngineWarningBadge(false);
+        return;
+    }
     if (result.reason === 'auth_expired') {
+        toposIngestFailureStreak = 0;
         console.warn('[APP_INGEST] Token rejected:', result.status, result.body || '');
         await setDialoguesErrorBadge(true);
         chrome.notifications?.create({
@@ -119,12 +131,18 @@ async function applyToposIngestResult(result, sourceId, recordCount = 1) {
         return;
     }
     if (result.sent) {
-        console.log('[APP_INGEST] Successfully sent', sourceId, `(${recordCount} record(s))`);
+        toposIngestFailureStreak = 0;
+        const note = result.in_flight ? ' (accepted; engine still processing)' : '';
+        console.log('[APP_INGEST] Successfully sent', sourceId, `(${recordCount} record(s))${note}`);
         await setDialoguesEngineWarningBadge(false);
         return;
     }
+    toposIngestFailureStreak += 1;
     console.warn('[APP_INGEST] Topos ingest issue:', sourceId, result);
-    await setDialoguesEngineWarningBadge(true);
+    // Ignore one-off races (nav success + click failure); latch only after repeated failures.
+    if (toposIngestFailureStreak >= 3) {
+        await setDialoguesEngineWarningBadge(true);
+    }
 }
 
 async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin' }) {
