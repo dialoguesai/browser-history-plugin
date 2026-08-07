@@ -329,6 +329,10 @@ saveButton.addEventListener('click', () => {
     chrome.storage.sync.set(
         { supabaseUrl, anonKey, skipDomains, device_name, showStarButton, dialoguesControlPlaneUrl: getControlPlaneUrl() },
         () => {
+            // Saving re-arms the Supabase sink after an auth/RLS auto-disable.
+            chrome.storage.sync.remove('supabaseSinkDisabledReason');
+            const sinkStatus = document.getElementById('supabaseSinkStatus');
+            if (sinkStatus) sinkStatus.style.display = 'none';
             statusText.style.visibility = 'visible';
             setTimeout(() => {
                 statusText.style.visibility = 'hidden';
@@ -382,10 +386,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         device_name: '',
         showStarButton: false,
         dialoguesToken: '',
-        dialoguesResourceId: ''
+        dialoguesResourceId: '',
+        supabaseSinkDisabledReason: ''
     });
     urlInput.value = items.supabaseUrl;
     keyInput.value = items.anonKey;
+    if (items.supabaseSinkDisabledReason) {
+        const sinkStatus = document.getElementById('supabaseSinkStatus');
+        if (sinkStatus) {
+            sinkStatus.textContent = items.supabaseSinkDisabledReason;
+            sinkStatus.style.display = 'block';
+        }
+    }
     listInput.value = (items.skipDomains || []).join('\n');
     deviceNameInput.value = items.device_name || '';
     showStarButtonInput.checked = items.showStarButton === true;

@@ -108,6 +108,8 @@ On first open of **Options → Topos**, redirect URIs for your install are regis
 
 Topos is the **default path**. Supabase is optional and clearly separate—you never need Supabase to use Dialogues.
 
+The Supabase sink must point at **your own** project (create the tables with `tables/make_table_browserplugin.sql` and add an insert policy). If the project rejects writes with an RLS or API-key error, the sink **disables itself** instead of retrying on every page visit — the Supabase tab shows why, and pressing **Save settings** re-arms it. A shared/hosted project that enforces row-level security will always reject anon-key inserts; that's what the Topos attach path is for.
+
 ---
 
 ## Privacy & trust
@@ -126,6 +128,7 @@ Topos is the **default path**. Supabase is optional and clearly separate—you n
 | Nothing syncing | Confirm **Attach Dialogues** is active on the Topos tab. |
 | Arc blocked attach | Reload the extension; ensure Options completed redirect setup (uses `chromiumapp.org` callback). |
 | 401 / 403 after working | Access may be revoked—reattach, or check **Connected apps** in Dialogues. |
+| Supabase tab shows a red "sink disabled" notice | Your Supabase project rejected writes (RLS policy or bad key). Fix the project's insert policy or credentials, then **Save settings** to re-enable. |
 | Debug logging | `chrome://extensions` → **Dialogues Browser History** → **Service worker** → Console (`[NAV]`, `[APP_INGEST]` lines). |
 
 ---
