@@ -134,6 +134,10 @@ async function applyToposIngestResult(result, sourceId, recordCount = 1) {
         toposIngestFailureStreak = 0;
         const note = result.in_flight ? ' (accepted; engine still processing)' : '';
         console.log('[APP_INGEST] Successfully sent', sourceId, `(${recordCount} record(s))${note}`);
+        // A landed send proves the connection is healthy, so clear BOTH error
+        // badges. Without clearing the red (connection-expired) one here it would
+        // stay latched after ingests recover, until a manual re-attach.
+        await setDialoguesErrorBadge(false);
         await setDialoguesEngineWarningBadge(false);
         return;
     }
