@@ -11,6 +11,25 @@ export function codexIdentity(env = process.env) {
     if (env.CODEX_THREAD_ID && env.CODEX_SESSION_ID && env.CODEX_THREAD_ID !== env.CODEX_SESSION_ID) throw new Error('Conflicting Codex conversation IDs; refusing to guess.');
     return { kind: 'agent', provider: 'OpenAI', name: 'Codex', conversation_source: 'codex_sessions', conversation_id: `codex:${id}` };
 }
+// Claude Code (CLI and Claude Desktop's Code tab) exports its transcript ID to tool
+// processes; TOPOS stores that transcript as claude_code:<session-id>.
+export function claudeCodeIdentity(env = process.env) {
+    const id = env.CLAUDE_CODE_SESSION_ID;
+    if (env.CLAUDECODE !== '1' || !id || !UUID.test(id)) throw new Error('Run this command inside the Claude Code conversation. No valid CLAUDE_CODE_SESSION_ID is available.');
+    return { kind: 'agent', provider: 'Anthropic', name: 'Claude', conversation_source: 'claude_code_sessions', conversation_id: `claude_code:${id}` };
+}
+export const ADAPTERS = { codex: codexIdentity, claude: claudeCodeIdentity };
+// One agent nested inside another inherits both environments; never pick for it.
+export function agentIdentity(env = process.env, agent = null) {
+    if (agent) {
+        if (!ADAPTERS[agent]) throw new Error(`Unknown agent "${agent}". Use ${Object.keys(ADAPTERS).join(' or ')}.`);
+        return ADAPTERS[agent](env);
+    }
+    const found = Object.keys(ADAPTERS).filter(name => { try { ADAPTERS[name](env); return true; } catch { return false; } });
+    if (found.length > 1) throw new Error(`Both ${found.join(' and ')} conversation IDs are present; pass --agent to say which agent controls the browser.`);
+    if (!found.length) throw new Error('No supported agent conversation found. Run inside Codex or Claude Code, or pass --agent for a clearer error.');
+    return ADAPTERS[found[0]](env);
+}
 export function httpUrl(value) {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Use an HTTP(S) URL without credentials.');

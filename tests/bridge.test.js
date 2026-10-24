@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { startBridge, codexIdentity } from '../agent-bridge/server.mjs';
+import { startBridge, codexIdentity, claudeCodeIdentity, agentIdentity } from '../agent-bridge/server.mjs';
 import { PendingActivity } from '../lib/pendingActivity.js';
 
 const event = () => ({ listeners: [], addListener(fn) { this.listeners.push(fn); } });
@@ -30,6 +30,31 @@ test('Codex adapter reads exact current identity; missing/conflicting IDs fail c
     assert.throws(() => codexIdentity({}), /No valid/);
     assert.throws(() => codexIdentity({ CODEX_THREAD_ID: '12345678-1234-1234-1234-123456789abc', CODEX_SESSION_ID: 'different' }), /Conflicting/);
     for (const url of ['https://127.0.0.1:1234', 'http://localhost:1234', 'http://127.0.0.1.evil:1234', 'http://user@127.0.0.1:1234']) assert.equal(bridgeLocation(url + path + 'connect#' + 'a'.repeat(64)), null);
+});
+
+test('Claude Code adapter reads its transcript ID; agent choice never guesses between nested agents', () => {
+    const id = '87654321-4321-4321-4321-cba987654321', codex = { CODEX_THREAD_ID: '12345678-1234-1234-1234-123456789abc' }, claude = { CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: id };
+    assert.deepEqual(claudeCodeIdentity(claude), { kind: 'agent', provider: 'Anthropic', name: 'Claude', conversation_source: 'claude_code_sessions', conversation_id: `claude_code:${id}` });
+    assert.throws(() => claudeCodeIdentity({ CLAUDE_CODE_SESSION_ID: id }), /No valid/);
+    assert.throws(() => claudeCodeIdentity({ CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'not-a-uuid' }), /No valid/);
+    assert.equal(agentIdentity(claude).name, 'Claude');
+    assert.equal(agentIdentity(codex).name, 'Codex');
+    assert.throws(() => agentIdentity({ ...codex, ...claude }), /pass --agent/);
+    assert.equal(agentIdentity({ ...codex, ...claude }, 'claude').conversation_id, `claude_code:${id}`);
+    assert.throws(() => agentIdentity(codex, 'claude'), /No valid CLAUDE_CODE_SESSION_ID/);
+    assert.throws(() => agentIdentity({}), /No supported agent/);
+    assert.throws(() => agentIdentity(claude, 'cursor'), /Unknown agent/);
+});
+
+test('real HTTP bridge hands a Claude identity to the extension unchanged', async t => {
+    const claude = claudeCodeIdentity({ CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: '87654321-4321-4321-4321-cba987654321' });
+    const bridge = await startBridge({ actor: claude, target: 'https://example.com/' });
+    t.after(() => bridge.close());
+    urls.set(41, bridge.launchUrl);
+    await connectAgentTab(41, bridge.launchUrl);
+    const identity = await captureActor(41);
+    for (const key of Object.keys(claude)) assert.equal(identity[key], claude[key]);
+    assert.equal((await status(bridge)).ack.actor.conversation_id, claude.conversation_id);
 });
 
 test('real HTTP bridge automatically attributes one tab, records activity, survives replacement and ends', async t => {

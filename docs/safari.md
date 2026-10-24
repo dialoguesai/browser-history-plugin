@@ -40,6 +40,14 @@ from TOPOS 1.5.21 after initial queue acceptance. Signing the app does not regis
 callbacks or preserve new fields in an older node. Custom servers must include
 the same patch. The local verifier can test payloads before server deployment.
 
+## Independent browser attachments
+
+Control-plane #181 scopes replacement grants to this browser installation.
+The plugin's stable local installation UUID survives temporary Safari callback
+UUID rotation; its editable Device name is separate. Credentials and names are
+local to the browser profile, with a one-time upgrade migration from old synced
+settings. Normal owner consent and explicit revocation remain unchanged.
+
 ## Build a signed macOS app
 
 Apple's converter generates an app containing the Safari extension:

@@ -1,22 +1,30 @@
 # Automatic local-agent handoff
 
-The bundled Codex adapter works in Chrome and Safari after normal installation,
+The bundled Codex and Claude Code adapters work after normal installation,
 website permissions, and (for delivery) Attach Dialogues. The agent performs the
 handoff. The owner never needs to fill in the agent identity fields.
 
 ## Agent procedure
 
-Run from this repository in the current Codex chat environment (Node 20+):
+Run from this repository inside the current Codex or Claude Code conversation
+(Node 20+). Claude Code includes Claude Desktop's Code tab, for example driving
+Chrome through Claude in Chrome:
 
 ```sh
 node agent-bridge/cli.mjs --url https://example.com --lease-minutes 15
 ```
 
-1. Keep the helper running. It reads `CODEX_THREAD_ID` / `CODEX_SESSION_ID`, rejects
-   missing or conflicting IDs, and constructs the exact `codex_sessions` /
-   `codex:<session-id>` parent. Do not invent an ID or reuse a different chat's ID.
+1. Keep the helper running. It picks the adapter from the environment:
+   - Codex: `CODEX_THREAD_ID` / `CODEX_SESSION_ID` → `codex_sessions` /
+     `codex:<session-id>`, provider OpenAI.
+   - Claude Code: `CLAUDECODE=1` and `CLAUDE_CODE_SESSION_ID` →
+     `claude_code_sessions` / `claude_code:<session-id>`, provider Anthropic.
+   Missing or conflicting IDs fail closed. When one agent runs inside the other,
+   both environments are present and the helper refuses to guess; pass
+   `--agent codex` or `--agent claude`. Do not invent an ID or reuse a different
+   chat's ID.
 2. Open the printed `launch_url` in the browser tab you will control.
-3. Wait until the page visibly says **Attributed to Codex**. Verify the displayed
+3. Wait until the page visibly says **Attributed to Codex** (or **Claude**). Verify the displayed
    parent. A waiting/error page is not a successful handoff; do not begin browsing.
 4. Use **Continue** and browse in that same tab. The extension captures the actor
    on visits and supported events. A cursor appears on that tab's toolbar icon.
@@ -34,7 +42,9 @@ and approved-controller APIs are separate paths, not part of this live proof.
 This is automatic identity transfer for a cooperating agent, not universal bot
 detection. The integration must be invoked before browser work. Other providers
 need an adapter that obtains their real source-scoped conversation identifiers;
-there is no built-in Claude or other-provider environment adapter yet. Unknown
+Codex and Claude Code are built in. Without the handoff, Claude in Chrome looks
+human to the extension: `navigator.webdriver` stays false and its clicks are
+trusted events, so its activity stays unknown. Unknown
 stays unknown when no declaration or positive signal exists.
 
 ## Verify before a node release

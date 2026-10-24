@@ -35,12 +35,13 @@ same real conversation parent was present in every outgoing record, and the
 helper confirmed the session ended. Initial failures remain in the private
 receipt; they are not counted as successful delivery.
 
-This exposes a server limitation separate from attribution: legacy self-grant
-approval revokes sibling grants for the same app/resource, without identifying
-the browser installation. Chrome and Safari each pass individually; simultaneous
-independent attachment needs an installation-aware grant fix. Renewing one
-browser's grant can invalidate the other. Canonical actor retention and node
-release plans are unchanged by this verification.
+The installation-aware server fix is now deployed in
+[control plane #181](https://github.com/dialoguesai/control-plane/pull/181).
+The original individual-browser results above remain historical evidence;
+the simultaneous-browser check then passed: Chrome kept delivering after Safari's renewal. The latest plugin adds
+local installation IDs, credentials and names, including a migration for existing
+installs and protection against stale synced names in old content scripts.
+All 24 plugin tests pass locally. No node release plan was changed.
 
 Safari attachment now passes after deploying the strict callback fix in
 [control-plane #178](https://github.com/dialoguesai/control-plane/pull/178).
@@ -91,3 +92,13 @@ an ordinary local website and the extension's implemented handoff protocol.
 - Deploy the coordinated node/UI changes before relying on live canonical actor
   retention, parent navigation, AI filtering or personal-interest exclusion.
 - Verify the signed Safari package, restart behavior and additional integrations.
+
+## Claude in Chrome (Claude Desktop)
+
+Claude in Chrome drives the owner's real Chrome profile. Without a handoff, its
+tab looked human to the plugin: `navigator.webdriver` was false and a Claude click
+arrived with `isTrusted: true`, so no automation hint fired and records stayed
+`unknown`. With the local handoff and a Claude Code identity (provider Anthropic,
+source `claude_code_sessions`, the real parent conversation), the extension
+claimed the identity automatically and a visit and click delivered with HTTP 200
+and the full actor envelope. The bundled CLI now includes this adapter (`--agent claude`).
