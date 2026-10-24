@@ -117,9 +117,10 @@
 
     <section aria-label="This browser" style="margin-bottom:1.5rem;">
         <h2 style="font-size:1.1rem;margin-bottom:0.25rem;">This browser</h2>
-        <label for="deviceName">Device name</label>
-        <input id="deviceName" type="text" maxlength="120" placeholder="e.g. Personal computer or Work computer" aria-describedby="deviceNameHint" />
-        <p id="deviceNameHint" class="hint">Give this browser a name to recognize its activity in Topos. Saved only in this browser, so each computer or browser can have its own name.</p>
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.75rem;">
+            <label for="deviceName" style="margin:0;white-space:nowrap;">Device name</label>
+            <input id="deviceName" type="text" maxlength="120" placeholder="e.g. Personal computer" style="flex:1;min-width:0;" />
+        </div>
     </section>
 
     <nav class="tabs" role="tablist" aria-label="Settings sections">
