@@ -1,10 +1,14 @@
+import { installationStorage } from './lib/installationStorage.js';
 console.log('[BACKGROUND] Service worker started');
+import { captureActor, actorBadge, handleActorMessage, bindPending } from './lib/actorRuntime.js';
+import { PendingActivity } from './lib/pendingActivity.js';
 import { getControlPlaneUrl } from './lib/config.js';
 import { buildSkipList, shouldSkipHostname } from './lib/skipDomains.js';
 import { dispatchRecord } from './lib/dispatch.js';
 import { exchangeGrantCode } from './lib/grantAccess.js';
 import { resetSupabaseClient } from './lib/supabaseIngest.js';
 import { registerInstallRedirects } from './lib/registerRedirect.js';
+import { isBridgePage, connectAgentTab, recordBridgeDelivery } from './lib/agentBridge.js';
 
 let skipDomains = buildSkipList([]);
 /** Consecutive Topos ingest failures; badge only latches after several (success always resets). */
@@ -44,9 +48,9 @@ function initFromStorage() {
 async function setDialoguesErrorBadge(show) {
     try {
         if (show) {
-            await chrome.storage.sync.set({ dialoguesConnectionExpired: true });
+            await installationStorage.set({ dialoguesConnectionExpired: true });
         } else {
-            await chrome.storage.sync.remove(['dialoguesConnectionExpired']);
+            await installationStorage.remove(['dialoguesConnectionExpired']);
         }
         await refreshDialoguesBadge();
     } catch (e) {
@@ -58,9 +62,9 @@ async function setDialoguesErrorBadge(show) {
 async function setDialoguesEngineWarningBadge(show) {
     try {
         if (show) {
-            await chrome.storage.sync.set({ dialoguesEngineWarning: true });
+            await installationStorage.set({ dialoguesEngineWarning: true });
         } else {
-            await chrome.storage.sync.remove(['dialoguesEngineWarning']);
+            await installationStorage.remove(['dialoguesEngineWarning']);
         }
         await refreshDialoguesBadge();
     } catch (e) {
@@ -72,7 +76,9 @@ async function setDialoguesEngineWarningBadge(show) {
 async function refreshDialoguesBadge() {
     try {
         if (typeof chrome.action === 'undefined') return;
-        const { dialoguesConnectionExpired, dialoguesEngineWarning } = await chrome.storage.sync.get({
+        const tabs = await chrome.tabs.query({});
+        await Promise.all(tabs.map(tab => actorBadge(tab.id)));
+        const { dialoguesConnectionExpired, dialoguesEngineWarning } = await installationStorage.get({
             dialoguesConnectionExpired: false,
             dialoguesEngineWarning: false
         });
@@ -100,10 +106,10 @@ async function applyStoredErrorBadge() {
 initFromStorage();
 applyStoredErrorBadge();
 // re‑run whenever options change
-chrome.storage.onChanged.addListener(initFromStorage);
+chrome.storage.onChanged.addListener((changes, area) => { if (area === 'sync') initFromStorage(); });
 // When connection-expired or engine-warning is cleared, refresh badge.
 chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'sync') return;
+    if (areaName !== 'local') return;
     const expiredCleared = 'dialoguesConnectionExpired' in changes && changes.dialoguesConnectionExpired.newValue === undefined;
     const engineWarningCleared = 'dialoguesEngineWarning' in changes && changes.dialoguesEngineWarning.newValue === undefined;
     if (expiredCleared || engineWarningCleared) {
@@ -149,8 +155,14 @@ async function applyToposIngestResult(result, sourceId, recordCount = 1) {
     }
 }
 
-async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin' }) {
-    const results = await dispatchRecord({ sourceId, record, supabaseTable });
+async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin', delivered = {} }) {
+    if (isBridgePage(record.url)) return { topos: { sent: false, reason: 'not_attached' } };
+    if (record.device_name == null || record.device_name === '') {
+        const { device_name = '' } = await installationStorage.get({ device_name: '' });
+        record.device_name = device_name;
+    }
+    const results = await dispatchRecord({ sourceId, record, supabaseTable, delivered });
+    await recordBridgeDelivery(sourceId, [record], results.topos || {});
     await applyToposIngestResult(results.topos, sourceId);
     if (results.supabase?.sent) {
         console.log('[SUPABASE] Logged', sourceId, record.url?.slice?.(0, 60));
@@ -160,6 +172,28 @@ async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin' 
     return results;
 }
 
+// Pending visits are an outbox, not a change to their event time.
+const pendingActivity = new PendingActivity(chrome.storage.session, ingestRecord);
+bindPending(pendingActivity);
+async function queueVisit(record, documentId = null) {
+    record.capture_id = crypto.randomUUID();
+    record.actor = await captureActor(record.tab_id, {}, Date.parse(record.visited_at), documentId);
+    await pendingActivity.add({ sourceId: 'browser_visits', record, documentId });
+    await pendingActivity.resolve(record.tab_id, await captureActor(record.tab_id, {}, Date.now(), documentId), documentId);
+    setTimeout(() => pendingActivity.flush().catch(console.warn), 2600);
+}
+chrome.alarms.create('flush-browser-activity', { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name === 'flush-browser-activity') {
+        pendingActivity.flush().catch(console.warn);
+        // Reuse the existing wake-up to clear cursors when controller leases end.
+        chrome.tabs.query({ active: true })
+            .then(tabs => Promise.all(tabs.map(tab => actorBadge(tab.id))))
+            .catch(console.warn);
+    }
+});
+pendingActivity.flush().catch(console.warn);
+
 const processedGrantRedirectUrls = new Set();
 
 function closeApprovalTab(tabId) {
@@ -168,12 +202,12 @@ function closeApprovalTab(tabId) {
         if (chrome.runtime.lastError) {
             console.log('[BACKGROUND] Approval tab already closed:', chrome.runtime.lastError.message);
         }
-        chrome.storage.sync.remove(['_approvalTabId']);
+        installationStorage.remove(['_approvalTabId']);
     });
 }
 
 async function exchangeGrantCodeInBackground(code, state, tabId) {
-    const base = await chrome.storage.sync.get({
+    const base = await installationStorage.get({
         _grantPendingState: '',
         _grantPkceVerifier: ''
     });
@@ -192,13 +226,13 @@ async function exchangeGrantCodeInBackground(code, state, tabId) {
         });
         await setDialoguesErrorBadge(false);
         await setDialoguesEngineWarningBadge(false);
-        await chrome.storage.sync.set({
+        await installationStorage.set({
             dialoguesToken: runToken,
             dialoguesResourceId: resourceId,
             dialoguesControlPlaneUrl: controlPlaneUrl,
             _grantQueryProcessed: true
         });
-        await chrome.storage.sync.remove(['_grantPendingState', '_grantPkceVerifier']);
+        await installationStorage.remove(['_grantPendingState', '_grantPkceVerifier']);
         console.log('[BACKGROUND] Token/resource_id stored from Grant Access exchange');
         closeApprovalTab(tabId);
         chrome.runtime.openOptionsPage?.();
@@ -238,7 +272,7 @@ function handleGrantRedirectUrl(url, tabId) {
         const resource_id = params.get('resource_id');
         if (access_token && resource_id) {
             console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
-            chrome.storage.sync.get([], async () => {
+            installationStorage.get([], async () => {
                 const toSet = {
                     dialoguesToken: access_token,
                     dialoguesResourceId: resource_id,
@@ -247,7 +281,7 @@ function handleGrantRedirectUrl(url, tabId) {
                 };
                 await setDialoguesErrorBadge(false);
                 await setDialoguesEngineWarningBadge(false);
-                chrome.storage.sync.set(toSet, () => {
+                installationStorage.set(toSet, () => {
                     console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect');
                     closeApprovalTab(tabId);
                 });
@@ -274,6 +308,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     if (details.frameId !== 0) return;
     const url = details.url;
     if (url === 'about:blank') return;
+    if (isBridgePage(url)) return;
 
     let hostname;
     try { hostname = new URL(url).hostname; }
@@ -297,18 +332,18 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     }
 
     // ─── get device_name from storage ────────────────────────────────────────────
-    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+    const { device_name = '' } = await installationStorage.get({ device_name: '' });
 
     // ─── build your record ───────────────────────────────────────────────────────
     const record = {
         url,
-        visited_at: new Date().toISOString(),
+        visited_at: new Date(details.timeStamp).toISOString(),
         title: tab.title,
         favicon_url: tab.favIconUrl,
         tab_id: details.tabId,
-        window_id: details.windowId,
+        window_id: tab.windowId,
         incognito: tab.incognito,
-        transition_type: details.transitionType,
+        transition_type: 'page_loaded',
         hostname,
 
         // ─── new fields ────────────────────────────────────────────────────────────
@@ -322,19 +357,17 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
         referred_by: null
     };
 
-    const results = await ingestRecord({ sourceId: 'browser_visits', record });
-    if (!results.topos?.sent && !results.supabase?.sent) {
-        console.log(
-            '[APP_INGEST] No sink configured — attach Dialogues (Topos tab) and/or set Supabase in Options.'
-        );
-    }
+    await queueVisit(record, details.documentId);
 });
 
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    const activatedAt = new Date().toISOString();
+    await actorBadge(activeInfo.tabId);
     try {
         const tab = await chrome.tabs.get(activeInfo.tabId);
         if (!tab.url || tab.url === 'about:blank') return;
+        if (isBridgePage(tab.url)) return;
 
         // Optionally, filter out skipDomains here as you do elsewhere
         let hostname;
@@ -346,12 +379,12 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         }
 
         // Get device_name from storage
-        const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+        const { device_name = '' } = await installationStorage.get({ device_name: '' });
 
         // Build your record (tab switch = revisit, so we send as browser_visits with transition_type tab_activated)
         const record = {
             url: tab.url,
-            visited_at: new Date().toISOString(),
+            visited_at: activatedAt,
             title: tab.title,
             favicon_url: tab.favIconUrl,
             tab_id: tab.id,
@@ -367,7 +400,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
             referred_by: null
         };
 
-        await ingestRecord({ sourceId: 'browser_visits', record });
+        await queueVisit(record);
     } catch (err) {
         console.error('Error handling tab activation', err);
     }
@@ -376,7 +409,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 async function handleStarPageMessage(msg, sender) {
     console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
 
-    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+    const { device_name = '' } = await installationStorage.get({ device_name: '' });
 
     let tabInfo = {};
     if (msg.tab_id == null && sender?.tab?.id) {
@@ -397,9 +430,11 @@ async function handleStarPageMessage(msg, sender) {
     }
 
     const record = {
+        capture_id: msg.capture_id || crypto.randomUUID(),
+        actor: msg._actor,
         url: msg.url,
-        starred_at: new Date().toISOString(),
-        visited_at: new Date().toISOString(),
+        starred_at: msg.visited_at || new Date().toISOString(),
+        visited_at: msg.visited_at || new Date().toISOString(),
         device_name,
         title: msg.title,
         favicon_url: msg.favicon_url,
@@ -423,7 +458,7 @@ async function handleClickOrHighlightMessage(msg, sender) {
     const eventType = msg.event_type || msg.type;
     let tabInfo = {};
     try {
-        if (sender.tab?.id) {
+        if (sender.tab?.id != null) {
             const t = await chrome.tabs.get(sender.tab.id);
             tabInfo = {
                 tab_id: t.id,
@@ -440,6 +475,8 @@ async function handleClickOrHighlightMessage(msg, sender) {
     }
 
     const record = {
+        capture_id: msg.capture_id || crypto.randomUUID(),
+        actor: msg._actor,
         url: msg.url,
         visited_at: msg.visited_at,
         title: msg.title,
@@ -472,7 +509,7 @@ async function handleVideoPlayMessage(msg, sender) {
 
     let tabInfo = {};
     try {
-        if (sender.tab?.id) {
+        if (sender.tab?.id != null) {
             const t = await chrome.tabs.get(sender.tab.id);
             tabInfo = {
                 tab_id: t.id,
@@ -489,6 +526,8 @@ async function handleVideoPlayMessage(msg, sender) {
     }
 
     const record = {
+        capture_id: msg.capture_id || crypto.randomUUID(),
+        actor: msg._actor,
         url: msg.url,
         visited_at: msg.visited_at,
         title: msg.title,
@@ -523,13 +562,35 @@ async function handleContentScriptMessage(msg, sender) {
     }
 }
 
+async function captureContentMessage(msg, sender) {
+    if (sender.id !== chrome.runtime.id || !sender.tab || sender.frameId !== 0) return;
+    const occurred = Date.parse(msg.visited_at);
+    const at = Number.isFinite(occurred) && Math.abs(Date.now() - occurred) < 60000 ? occurred : Date.now();
+    const actor = await captureActor(sender.tab.id, msg.automation_signals || {}, at, sender.documentId);
+    await pendingActivity.resolve(sender.tab.id, actor, sender.documentId);
+    await actorBadge(sender.tab.id, actor);
+    // An old content script may still carry a synchronized device name after
+    // an upgrade. The browser's local name is authoritative at capture time.
+    const { device_name = '' } = await installationStorage.get({ device_name: '' });
+    const safe = { ...msg, device_name, capture_id: crypto.randomUUID(), _actor: actor, tab_id: undefined };
+    await handleContentScriptMessage(safe, sender);
+}
+
 // MV3: return true so the worker stays alive until async ingest completes; must call sendResponse.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    handleContentScriptMessage(msg, sender)
-        .then(() => sendResponse({ ok: true }))
+    if (msg.type === 'AGENT_BRIDGE_READY') {
+        if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !sender.tab || !isBridgePage(sender.url)) return false;
+        connectAgentTab(sender.tab.id, sender.url).then(() => sendResponse({ ok: true })).catch(e => sendResponse({ ok: false, error: e.message }));
+        return true;
+    }
+    const task = (msg.type?.startsWith('ACTOR_') || msg.type === 'AUTOMATION_HINT')
+        ? handleActorMessage(msg, sender)
+        : captureContentMessage(msg, sender);
+    task
+        .then(result => sendResponse(result || { ok: true }))
         .catch((err) => {
             console.error('[CONTENT_EVENT] Handler failed:', err);
-            sendResponse({ ok: false });
+            sendResponse({ ok: false, error: err.message });
         });
     return true;
 });
@@ -573,5 +634,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         opener_tab_id: tab.openerTabId ?? null
     };
 
+    payload._actor = await captureActor(tab.id);
+    payload.capture_id = crypto.randomUUID();
     await handleStarPageMessage(payload, { tab });
 });

@@ -8,7 +8,6 @@ function getPrefs() {
         try {
             if (!chrome.runtime?.id) {
                 resolve({
-                    device_name: '',
                     user_id: null,
                     referred_by: document.referrer || null
                 });
@@ -16,7 +15,6 @@ function getPrefs() {
             }
             chrome.storage.sync.get(
                 {
-                    device_name: '',
                     user_id: null,
                     referred_by: document.referrer || null
                 },
@@ -24,7 +22,6 @@ function getPrefs() {
             );
         } catch (err) {
             resolve({
-                device_name: '',
                 user_id: null,
                 referred_by: document.referrer || null
             });
@@ -45,8 +42,8 @@ function getPageMeta() {
 async function sendRichMessage(eventType, transitionType, contentObj = {}, extras = {}) {
     try {
         if (!chrome.runtime?.id) return;
-        const prefs = await getPrefs();
         const meta = getPageMeta();
+        const prefs = await getPrefs();
 
         chrome.runtime.sendMessage({
             event_type: eventType,
@@ -55,6 +52,7 @@ async function sendRichMessage(eventType, transitionType, contentObj = {}, extra
             ...meta,
             ...prefs,
             ...extras,
+            automation_signals: { webdriver: navigator.webdriver === true, ...extras.automation_signals },
             content: contentObj
         });
     } catch (err) {
@@ -66,7 +64,7 @@ function initVideoPlayTracking() {
     document.addEventListener('play', e => {
         const v = e.target;
         if (v.tagName === 'VIDEO' && v.currentSrc) {
-            sendRichMessage('VIDEO_PLAY', 'video_play', { videoUrl: v.currentSrc });
+            sendRichMessage('VIDEO_PLAY', 'video_play', { videoUrl: v.currentSrc }, { automation_signals: { is_trusted: e.isTrusted } });
         }
     }, true);
 }
@@ -99,8 +97,8 @@ async function maybeInjectStarButton() {
         cursor: 'pointer'
     });
 
-    btn.addEventListener('click', () => {
-        sendRichMessage('STAR_PAGE', 'star_page');
+    btn.addEventListener('click', e => {
+        sendRichMessage('STAR_PAGE', 'star_page', {}, { automation_signals: { is_trusted: e.isTrusted } });
         btn.innerText = '⭐ Starred!';
         btn.disabled = true;
         setTimeout(() => {
@@ -159,7 +157,7 @@ function initClickTracking() {
             y: e.clientY,
             element: selector(e.target),
             timestamp: new Date().toISOString()
-        });
+        }, { automation_signals: { is_trusted: e.isTrusted } });
     }
 
     document.addEventListener('click', onClick, true);
@@ -172,7 +170,7 @@ function initHighlightTracking() {
         return el?.tagName.toLowerCase() || '';
     }
 
-    async function onSelect() {
+    async function onSelect(e) {
         const sel = window.getSelection();
         if (!sel || sel.isCollapsed) return;
         const txt = sel.toString().trim();
@@ -182,13 +180,13 @@ function initHighlightTracking() {
             selectedText: txt,
             anchorNode: anchorTag(sel),
             timestamp: new Date().toISOString()
-        });
+        }, { automation_signals: { is_trusted: e?.isTrusted } });
     }
 
     document.addEventListener('mouseup', onSelect, false);
     document.addEventListener('keyup', e => {
         if (['Shift', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-            onSelect();
+            onSelect(e);
         }
     }, false);
 }
@@ -206,4 +204,20 @@ if (skipInteraction) {
     initInteractionTracking();
 }
 
-initStarButtonWatcher();
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initStarButtonWatcher, { once: true });
+else initStarButtonWatcher();
+
+// One cheap signal per document. No polling, fingerprinting or network detector.
+chrome.runtime.sendMessage({ type: 'AUTOMATION_HINT', webdriver: navigator.webdriver === true }).then(result => {
+    if (!result?.identify) return;
+    const show = () => {
+        const host = document.createElement('div');
+        const root = host.attachShadow({ mode: 'closed' });
+        const button = document.createElement('button');
+        button.textContent = 'TOPOS: automation detected — identify agent & conversation';
+        button.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;padding:12px;border:1px solid #9be0b7;border-radius:8px;background:#16261e;color:white;font:13px system-ui;cursor:pointer';
+        button.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'ACTOR_IDENTIFY' }).then(() => host.remove()));
+        root.append(button); document.documentElement.append(host);
+    };
+    if (document.documentElement) show(); else document.addEventListener('DOMContentLoaded', show, { once: true });
+}).catch(() => {});

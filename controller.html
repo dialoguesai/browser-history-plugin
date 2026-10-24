@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Browser activity attribution</title><link rel="stylesheet" href="controller.css"></head>
+<body><main>
+<div class="eyebrow">TOPOS · BROWSER ACTIVITY</div><h1>Who’s using this tab?</h1>
+<p id="tab-title"></p><p id="status" role="status">Loading…</p>
+<form id="actor-form">
+<fieldset class="controller-choices"><legend>Controller</legend>
+<input type="hidden" id="kind" value="unknown">
+<label><input type="radio" name="controller" value="unknown" checked> Unknown / detect</label>
+<label><input type="radio" name="controller" value="human"> Me</label>
+<label><input type="radio" name="controller" value="agent"> AI agent</label>
+</fieldset>
+<fieldset id="identity" hidden><legend>Link the agent’s work</legend>
+<label>Provider<input id="provider" placeholder="OpenAI, Anthropic, …" maxlength="80"></label>
+<label>Agent name<input id="name" placeholder="Codex" maxlength="80"></label>
+<label>Conversation source ID<input id="conversation_source" placeholder="The chat source ID in TOPOS" maxlength="120"></label>
+<label>Conversation ID<input id="conversation_id" placeholder="Parent conversation ID" maxlength="256"></label>
+<label>Turn ID <span>(optional)</span><input id="turn_id" maxlength="256"></label>
+<p class="hint">Use the conversation identifiers from the connected chat source. The link is retained even if that conversation has not synced yet.</p>
+</fieldset>
+<button type="submit">Apply to this tab</button></form>
+<p class="hint">Mode follows this tab across navigation. Switch back to “Me” when you take over. A browser restart clears the mode.</p>
+<details><summary>Approved controller integrations</summary><p class="hint">Only extension IDs you approve here may declare AI sessions. Websites cannot set identity.</p><label>Extension IDs (one per line)<textarea id="controllers" rows="3" spellcheck="false"></textarea></label><label>Agent group names (exact names, one per line)<textarea id="group-names" rows="2" spellcheck="false"></textarea></label><p class="hint">Matching a group suggests automation; it does not identify a provider or conversation.</p><button id="save-controllers" type="button">Save approved controllers</button></details>
+<button class="link" id="options" type="button">Connection settings</button>
+</main><script type="module" src="controller.js"></script></body></html>

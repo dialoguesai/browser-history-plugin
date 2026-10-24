@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icons/icon-48.png" alt="Dialogues Browser History" width="96" height="96" />
+  <img src="icons/toolbar-128.png" alt="Dialogues Browser History" width="96" height="96" />
 </p>
 
 <h1 align="center">Dialogues Browser History</h1>
@@ -13,7 +13,7 @@
   ·
   <code>app_id</code>: <code>browser-history-plugin</code>
   ·
-  Chrome · Arc · Edge (Chromium) · Manifest V3
+  Chrome · Safari development build · Manifest V3
 </p>
 
 <p align="center">
@@ -39,6 +39,17 @@ Your browser already keeps browsing history. You can search it, scroll it, and r
 | **Skip what you want** | Block domains you do not want recorded (work tools, banks, etc.). |
 
 ---
+
+## Browser controller attribution (3.1 candidate)
+
+Codex can declare its real agent/provider and parent conversation automatically
+before controlling a Chrome or Safari tab, with no identity form entry.
+[Automatic agent handoff](docs/agent-bridge.md) includes the bundled local helper.
+The toolbar adds a cursor only for agent/automation tabs; human and unassigned
+tabs keep the clean colored icon. Capture attribution is independent of this display.
+[Setup and integration contract](docs/browser-attribution.md) · [Tested browser support](docs/browser-support.md).
+The coordinated TOPOS node/UI changes are required for downstream filtering and
+personal-interest exclusion. This candidate is not yet a deployed release.
 
 ## What it captures
 
@@ -126,6 +137,7 @@ The Supabase sink must point at **your own** project (create the tables with `ta
 | Issue | What to try |
 |-------|-------------|
 | Nothing syncing | Confirm **Attach Dialogues** is active on the Topos tab. |
+| Safari callback setup fails | The control plane must support Safari UUID-origin callbacks; Apple signing alone does not fix callback registration. See [Safari packaging](docs/safari.md). |
 | Arc blocked attach | Reload the extension; ensure Options completed redirect setup (uses `chromiumapp.org` callback). |
 | 401 / 403 after working | Access may be revoked—reattach, or check **Connected apps** in Dialogues. |
 | Supabase tab shows a red "sink disabled" notice | Your Supabase project rejected writes (RLS policy or bad key). Fix the project's insert policy or credentials, then **Save settings** to re-enable. |
@@ -157,4 +169,9 @@ Licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Version
 
-**3.0.2** — Dialogues Browser History (Manifest V3)
+**3.1.0 candidate** — Dialogues Browser History (Manifest V3)
+
+
+## Toolbar artwork
+
+The toolbar uses its own transparent `icons/toolbar-source.png`, with PNG exports at 16, 20, 24, 32, 40, 48, 64, and 128 pixels for different display scales. The app icon now uses the same approved colored family. Agent control adds a black pointer with a white outline at runtime; it does not alter these source assets. To regenerate toolbar sizes, install Pillow (`python3 -m pip install Pillow`) and run `python3 scripts/make-icons.py`.
