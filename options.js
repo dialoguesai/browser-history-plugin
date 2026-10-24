@@ -84,7 +84,7 @@ function showRedirectSetup(message, kind = 'warn') {
 }
 
 function redirectSetupNeedsRefresh(stored) {
-    const extensionId = chrome.runtime.id;
+    const extensionId = redirectUrisForThisInstall().extensionId;
     if (stored.connectSetupKey && stored.connectSetupKey !== DIALOGUES_CONNECT_SETUP_KEY) {
         return true;
     }
@@ -242,7 +242,9 @@ attachDialoguesBtn.addEventListener('click', async () => {
     const alreadyAttached = !!(dialoguesToken && dialoguesResourceId);
     const ok = await ensureRedirectRegistration(base, { isAttached: alreadyAttached, force: true });
     if (!ok) {
-        setAttachStatus('Fix redirect setup first, or use register-redirect.sh, then try again.', 'red');
+        setAttachStatus(redirectUrisForThisInstall().browser === 'safari'
+            ? 'Safari attachment needs the Safari callback update on the Dialogues server. Automatic agent attribution can still run locally.'
+            : 'Could not register this browser. See the connection error above and retry.', 'red');
         return;
     }
     try {
@@ -264,7 +266,7 @@ attachDialoguesBtn.addEventListener('click', async () => {
         console.log('[OPTIONS] Grant Access URL:', url);
         console.log('[OPTIONS] redirect_uri:', getGrantRedirectUri());
 
-        if (chrome.identity?.launchWebAuthFlow) {
+        if (redirectUrisForThisInstall().browser !== 'safari' && chrome.identity?.launchWebAuthFlow) {
             chrome.identity.launchWebAuthFlow({ url, interactive: true }, async (responseUrl) => {
                 if (chrome.runtime.lastError) {
                     setAttachStatus(`Attach cancelled: ${chrome.runtime.lastError.message}`, 'red');

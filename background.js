@@ -7,6 +7,7 @@ import { dispatchRecord } from './lib/dispatch.js';
 import { exchangeGrantCode } from './lib/grantAccess.js';
 import { resetSupabaseClient } from './lib/supabaseIngest.js';
 import { registerInstallRedirects } from './lib/registerRedirect.js';
+import { isBridgePage, connectAgentTab, recordBridgeDelivery } from './lib/agentBridge.js';
 
 let skipDomains = buildSkipList([]);
 /** Consecutive Topos ingest failures; badge only latches after several (success always resets). */
@@ -154,7 +155,9 @@ async function applyToposIngestResult(result, sourceId, recordCount = 1) {
 }
 
 async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin', delivered = {} }) {
+    if (isBridgePage(record.url)) return { topos: { sent: false, reason: 'not_attached' } };
     const results = await dispatchRecord({ sourceId, record, supabaseTable, delivered });
+    await recordBridgeDelivery(sourceId, [record], results.topos || {});
     await applyToposIngestResult(results.topos, sourceId);
     if (results.supabase?.sent) {
         console.log('[SUPABASE] Logged', sourceId, record.url?.slice?.(0, 60));
@@ -176,7 +179,13 @@ async function queueVisit(record, documentId = null) {
 }
 chrome.alarms.create('flush-browser-activity', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(alarm => {
-    if (alarm.name === 'flush-browser-activity') pendingActivity.flush().catch(console.warn);
+    if (alarm.name === 'flush-browser-activity') {
+        pendingActivity.flush().catch(console.warn);
+        // Reuse the existing wake-up to clear cursors when controller leases end.
+        chrome.tabs.query({ active: true })
+            .then(tabs => Promise.all(tabs.map(tab => actorBadge(tab.id))))
+            .catch(console.warn);
+    }
 });
 pendingActivity.flush().catch(console.warn);
 
@@ -294,6 +303,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     if (details.frameId !== 0) return;
     const url = details.url;
     if (url === 'about:blank') return;
+    if (isBridgePage(url)) return;
 
     let hostname;
     try { hostname = new URL(url).hostname; }
@@ -352,6 +362,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     try {
         const tab = await chrome.tabs.get(activeInfo.tabId);
         if (!tab.url || tab.url === 'about:blank') return;
+        if (isBridgePage(tab.url)) return;
 
         // Optionally, filter out skipDomains here as you do elsewhere
         let hostname;
@@ -559,6 +570,11 @@ async function captureContentMessage(msg, sender) {
 
 // MV3: return true so the worker stays alive until async ingest completes; must call sendResponse.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === 'AGENT_BRIDGE_READY') {
+        if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !sender.tab || !isBridgePage(sender.url)) return false;
+        connectAgentTab(sender.tab.id, sender.url).then(() => sendResponse({ ok: true })).catch(e => sendResponse({ ok: false, error: e.message }));
+        return true;
+    }
     const task = (msg.type?.startsWith('ACTOR_') || msg.type === 'AUTOMATION_HINT')
         ? handleActorMessage(msg, sender)
         : captureContentMessage(msg, sender);

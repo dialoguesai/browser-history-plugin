@@ -6,11 +6,20 @@ The actor describes the controller of the tab at the event's time.
 
 ## Use it
 
+For automatic Codex attribution in Chrome and Safari, use the bundled
+[local agent handoff](agent-bridge.md). It reads the current chat identity from
+the agent environment and requires no typing into the extension popup.
+
 Open the toolbar popup and choose **Me**, **AI agent**, or **Unknown / detect
 automation**. AI mode requires the provider, agent name, conversation source ID
 and conversation ID; a turn ID is optional. Use the source's canonical ID,
 including its namespace prefix (for example `codex:…` in `codex_sessions`). The
 reference remains valid if the chat source has not synced the parent yet.
+
+The toolbar shows a black pointer with a white outline for agent/automation
+control. Human and unresolved tabs have no controller badge. Switching the
+visible tab changes only its icon and title, never an event’s saved identity.
+A connection error can still show `!`; this is separate from attribution.
 
 Mode follows a tab across navigation. Explicit AI mode is inherited by tabs
 opened from that tab. Switch to **Me** when taking over. Closing the tab or

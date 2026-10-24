@@ -1,52 +1,39 @@
 # Browser and AI-control support
 
-Status: development candidate, 2026-10-24. This is a capability matrix, not a
-claim that every bot can be detected automatically.
+Development candidate tested on macOS, 2026-10-24. These results distinguish
+identity transfer, payload capture, and a deployed node's canonical behavior.
 
-| Environment | Extension loading / capture | Explicit AI identity + parent | Automatic signals | Evidence |
-|---|---|---|---|---|
-| Google Chrome 155.0.8059.86 (macOS) | Unpacked install confirmed; worker and popup running; capture delivery not yet live-tested | Owner confirmed successful Codex/OpenAI assignment with a source-scoped parent in the popup | A controlled tab correctly remained unknown without a declaration; no universal bot detection claim | Native toolbar/popup inspected; owner completed identity form because browser automation policy blocks extension URLs |
-| Dia (Chromium) | Existing activity capture observed | Candidate implementation not yet loaded | Agent tab group and browser debugging infobar observed; neither supplies a conversation ID | Example.com visit observed in TOPOS before attribution changes |
-| Safari 27.0.1 (macOS) | Temporary extension loaded and enabled; worker and popup running; capture delivery not yet live-tested | Codex/OpenAI + parent assignment, popup reopening, page reload, URL navigation and human/unknown handoff passed | Native agent input alone remained unknown. Group and external-controller APIs are not validated | Live native-UI test found tab-ID replacement on navigation; `tabs.onReplaced` history transfer fixed it and the repeated navigation test retained the same named parent |
-| Edge / Arc / other Chromium | Not tested for this candidate | Expected to share Chromium APIs, unverified | Unverified | No compatibility claim |
+| Environment | Automatic Codex identity + real parent | Capture / delivery | Limits |
+|---|---|---|---|
+| Chrome 155.0.8059.86 | Passed using the bundled local handoff, no identity form entry | Actual attributed visit captured; normal TOPOS write succeeded; matching URL/time read back from running TOPOS 1.5.20 | Released node 1.5.20 does not preserve/expose the new actor envelope. Final cursor tab-switch/end check passed. |
+| Safari 27.0.1 | Passed using the same helper, no identity form entry; retained across navigation/tab replacement | Actual attributed visits and tab activations received by local verifier; exact parent preserved | Live TOPOS attachment blocked by missing Safari callback registration in the deployed control plane. Fix is prepared and tested, not deployed. |
+| Dia (Chromium) | Not tested with the new handoff | Prior unlabelled Example.com activity observed in TOPOS | Group/debugging UI alone cannot supply a parent ID. |
+| Edge / Arc / other Chromium | Not tested with this candidate | Not tested | No live compatibility claim. |
 
-A browser's ability to run the extension is separate from an agent provider's
-ability to declare its conversation. Codex's observed group/debugging UI alone
-cannot supply the parent ID. Cooperative explicit declaration is required for
-named, conversation-linked attribution. Unknown actions stay unknown.
+Chrome and Safari cursors were visually verified on an agent tab, absent on an unassigned
+tab, present again when returning to the agent tab, and cleared after automatic
+session end. Captured tab-switch records retained the original agent/session
+and parent. Human/unknown remain distinct in payloads despite sharing a clean
+icon. Normal browser permission/installation and owner account grants are still
+required; they are not agent identity entry.
 
-**Autonomous agent use is not yet certified in either browser.** Chrome's check
-was operator-assisted: the owner filled and submitted the identity form. Safari's
-check did include the agent filling and submitting the form through native UI
-automation after installation and permissions were approved by the owner.
-This demonstrates a cooperative UI declaration path in Safari, not automatic
-agent detection, discovery of the agent's real parent conversation, a signed
-Safari distribution, or browser-to-TOPOS delivery. Both test installations stayed
-unattached to TOPOS and used a synthetic parent reference. See the exact
-[agent-operation evidence and gaps](agent-validation.md).
-The 11 extension tests cover actor validation, event-time history, replacements,
-leases, sender validation, group observation and delayed delivery/retries.
+Both browsers' real captured payloads passed the candidate node's ingestion,
+canonical actor preservation, exact parent lookup, AI timeline filter, and
+personal-enrichment exclusion checks in an isolated database. This is replay
+acceptance, not evidence that those node changes are deployed.
 
-The coordinated implementation is under review in
-[TOPOS node #195](https://github.com/dialoguesai/topos/pull/195),
-[control plane #170](https://github.com/dialoguesai/control-plane/pull/170), and
+See [agent-operation evidence](agent-validation.md), [automatic handoff](agent-bridge.md)
+and [Safari packaging and callback setup](safari.md). The 19 extension tests
+cover actor validation, event time, tab replacement, sender validation, delayed
+delivery, HTTP handoff, OAuth state, and per-tab cursor isolation.
+
+Coordinated draft changes:
+[plugin #2](https://github.com/dialoguesai/browser-history-plugin/pull/2),
+[node #195](https://github.com/dialoguesai/topos/pull/195),
+[control plane #170](https://github.com/dialoguesai/control-plane/pull/170),
 [timeline #161](https://github.com/dialoguesai/topos-react-app/pull/161).
-Node/UI verification uses synthetic records and temporary databases. Live
-extension-to-node delivery, restart behavior in each browser, child tabs,
-and approved-controller integration remain release acceptance checks.
+They do not select or change the node's release version.
 
-Chrome setup: open chrome://extensions yourself, turn on Developer mode, choose
-Load unpacked, and select the extension folder. Do not attach a test installation
-to production merely to test actor assignment.
-
-Safari setup depends on the installed release. Apple's development workflow
-supports temporary web-extension folders on recent Safari versions; older
-versions require conversion/package steps. See [Apple's running guide](https://developer.apple.com/documentation/safariservices/running-your-safari-web-extension)
-and [API compatibility guide](https://developer.apple.com/documentation/safariservices/assessing-your-safari-web-extension-s-browser-compatibility).
-
-Acceptance checks: installation errors; unknown default; explicit agent identity
-and parent; navigation retention; handoff to human; child-tab inheritance; late
-follow-up; browser restart; capture delivery into a test node; timeline filters;
-AI/unknown exclusion from personal interests. Record browser version and tested
-agent/control method with results. Do not turn a failed or unperformed test into
-a supported claim.
+Still unverified: full Safari grant-to-live-node delivery after deployment,
+a signed/notarized Safari distribution, a complete browser restart cycle,
+real child-tab inheritance and approved external-controller integrations.
