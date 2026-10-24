@@ -68,6 +68,10 @@
             margin-top: 0.25rem;
         }
 
+        @media (prefers-color-scheme: dark) {
+            .hint { color: #b8bdc7; }
+        }
+
         .status-box {
             margin-top: 0.75rem;
             padding: 0.5rem;
@@ -111,6 +115,13 @@
 <body>
     <h1>Dialogues Browser History</h1>
 
+    <section aria-label="This browser" style="margin-bottom:1.5rem;">
+        <h2 style="font-size:1.1rem;margin-bottom:0.25rem;">This browser</h2>
+        <label for="deviceName">Device name</label>
+        <input id="deviceName" type="text" maxlength="120" placeholder="e.g. Personal computer or Work computer" aria-describedby="deviceNameHint" />
+        <p id="deviceNameHint" class="hint">Give this browser a name to recognize its activity in Topos. Saved only in this browser, so each computer or browser can have its own name.</p>
+    </section>
+
     <nav class="tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class="active" data-tab="topos" role="tab" aria-selected="true">Topos</button>
         <button type="button" data-tab="supabase" role="tab" aria-selected="false">Supabase</button>
@@ -150,13 +161,8 @@
     </section>
 
     <section id="panel-general" class="panel" data-panel="general" role="tabpanel" hidden>
-        <p class="hint"><strong>Grant Access setup</strong> — registers this extension install with Control Plane (once per unpacked ID).</p>
         <div id="redirectSetupStatus" class="status-box status-warn" style="display:none;"></div>
-        <button type="button" id="retryRedirectSetup" style="display:none;margin-bottom:0.75rem;">Retry redirect setup</button>
-        <label>
-            Device name
-            <input id="deviceName" type="text" placeholder="e.g. My Laptop" />
-        </label>
+        <button type="button" id="retryRedirectSetup" style="display:none;margin-bottom:0.75rem;">Retry connection setup</button>
         <label style="display:flex;align-items:center;gap:0.5rem;">
             <input id="showStarButton" type="checkbox" style="width:auto;" />
             <span>Show on-page Star button</span>

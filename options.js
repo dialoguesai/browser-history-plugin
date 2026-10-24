@@ -1,3 +1,4 @@
+import { installationStorage } from './lib/installationStorage.js';
 import {
     getControlPlaneUrl,
     DIALOGUES_CONNECT_APP_ID,
@@ -173,7 +174,7 @@ async function ensureRedirectRegistration(controlPlaneUrl, { isAttached = false,
 
 function _saveTokenAndResourceId(access_token, resource_id) {
     const controlPlaneUrl = getControlPlaneUrl();
-    chrome.storage.sync.set(
+    installationStorage.set(
             {
                 dialoguesToken: access_token,
                 dialoguesResourceId: resource_id,
@@ -182,23 +183,23 @@ function _saveTokenAndResourceId(access_token, resource_id) {
         () => {
             updateAttachUI({ dialoguesToken: access_token, dialoguesResourceId: resource_id });
             setAttachStatus('Connected to Topos', 'green');
-            chrome.storage.sync.remove(['_grantPendingState', '_grantPkceVerifier', '_grantQueryProcessed']);
+            installationStorage.remove(['_grantPendingState', '_grantPkceVerifier', '_grantQueryProcessed']);
             _closeApprovalTabIfNeeded();
         }
     );
 }
 
 function _closeApprovalTabIfNeeded() {
-    chrome.storage.sync.get(['_approvalTabId'], (result) => {
+    installationStorage.get(['_approvalTabId'], (result) => {
         const tabId = result._approvalTabId;
         if (tabId != null) {
-            chrome.tabs.remove(tabId, () => chrome.storage.sync.remove('_approvalTabId'));
+            chrome.tabs.remove(tabId, () => installationStorage.remove('_approvalTabId'));
         }
     });
 }
 
 async function completeGrantFromCode(code, stateFromUrl) {
-    const stored = await chrome.storage.sync.get({
+    const stored = await installationStorage.get({
         _grantPendingState: '',
         _grantPkceVerifier: ''
     });
@@ -234,8 +235,8 @@ async function parseGrantRedirectQuery() {
 
 attachDialoguesBtn.addEventListener('click', async () => {
     const base = getControlPlaneUrl();
-    await chrome.storage.sync.set({ dialoguesControlPlaneUrl: base });
-    const { dialoguesToken, dialoguesResourceId } = await chrome.storage.sync.get({
+    await installationStorage.set({ dialoguesControlPlaneUrl: base });
+    const { dialoguesToken, dialoguesResourceId } = await installationStorage.get({
         dialoguesToken: '',
         dialoguesResourceId: ''
     });
@@ -259,7 +260,7 @@ attachDialoguesBtn.addEventListener('click', async () => {
             setAttachStatus(`Cannot start attach: ${preflightErr?.message || preflightErr}${hint}`, 'red');
             return;
         }
-        await chrome.storage.sync.set({
+        await installationStorage.set({
             _grantPendingState: pendingState,
             _grantPkceVerifier: codeVerifier
         });
@@ -291,7 +292,7 @@ attachDialoguesBtn.addEventListener('click', async () => {
             return;
         }
 
-        chrome.tabs.create({ url }, (tab) => chrome.storage.sync.set({ _approvalTabId: tab.id }));
+        chrome.tabs.create({ url }, (tab) => installationStorage.set({ _approvalTabId: tab.id }));
     } catch (e) {
         setAttachStatus(`Could not start attach: ${e?.message || e}`, 'red');
     }
@@ -300,7 +301,7 @@ attachDialoguesBtn.addEventListener('click', async () => {
 retryRedirectSetupBtn.addEventListener('click', async () => {
     const base = getControlPlaneUrl();
     await chrome.storage.sync.remove(['redirectSetupDone', 'redirectSetupError', 'redirectSetupSkippedApi']);
-    const { dialoguesToken, dialoguesResourceId } = await chrome.storage.sync.get({
+    const { dialoguesToken, dialoguesResourceId } = await installationStorage.get({
         dialoguesToken: '',
         dialoguesResourceId: ''
     });
@@ -310,7 +311,7 @@ retryRedirectSetupBtn.addEventListener('click', async () => {
 });
 
 detachDialoguesBtn.addEventListener('click', () => {
-    chrome.storage.sync.remove(
+    installationStorage.remove(
         ['dialoguesToken', 'dialoguesResourceId', 'dialoguesConnectionExpired', 'dialoguesEngineWarning'],
         () => {
             updateAttachUI({});
@@ -319,17 +320,18 @@ detachDialoguesBtn.addEventListener('click', () => {
     );
 });
 
-saveButton.addEventListener('click', () => {
+saveButton.addEventListener('click', async () => {
     const supabaseUrl = urlInput.value.trim();
     const anonKey = keyInput.value.trim();
     const skipDomains = listInput.value
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean);
-    const device_name = deviceNameInput.value.trim();
+    const device_name = deviceNameInput.value.trim().slice(0, 120);
+    await installationStorage.set({ device_name });
     const showStarButton = !!showStarButtonInput.checked;
     chrome.storage.sync.set(
-        { supabaseUrl, anonKey, supabaseActorColumns: document.getElementById('supabaseActorColumns').checked, skipDomains, device_name, showStarButton, dialoguesControlPlaneUrl: getControlPlaneUrl() },
+        { supabaseUrl, anonKey, supabaseActorColumns: document.getElementById('supabaseActorColumns').checked, skipDomains, showStarButton, dialoguesControlPlaneUrl: getControlPlaneUrl() },
         () => {
             // Saving re-arms the Supabase sink after an auth/RLS auto-disable.
             chrome.storage.sync.remove('supabaseSinkDisabledReason');
@@ -377,15 +379,13 @@ async function loadStarredWebsites() {
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
     void parseGrantRedirectQuery();
+    const local = await installationStorage.get({ device_name: '', dialoguesToken: '', dialoguesResourceId: '' });
     const items = await chrome.storage.sync.get({
         supabaseActorColumns: false,
         supabaseUrl: '',
         anonKey: '',
         skipDomains: [],
-        device_name: '',
         showStarButton: false,
-        dialoguesToken: '',
-        dialoguesResourceId: '',
         supabaseSinkDisabledReason: ''
     });
     document.getElementById('supabaseActorColumns').checked = items.supabaseActorColumns;
@@ -399,24 +399,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     listInput.value = (items.skipDomains || []).join('\n');
-    deviceNameInput.value = items.device_name || '';
+    deviceNameInput.value = local.device_name || '';
     showStarButtonInput.checked = items.showStarButton === true;
-    updateAttachUI(items);
+    updateAttachUI(local);
     chrome.storage.sync.remove(['dialoguesClientSecret', 'dialoguesUrl']);
     const cpUrl = getControlPlaneUrl();
     await chrome.storage.sync.set({ dialoguesControlPlaneUrl: cpUrl });
-    const isAttached = !!(items.dialoguesToken && items.dialoguesResourceId);
+    const isAttached = !!(local.dialoguesToken && local.dialoguesResourceId);
     void ensureRedirectRegistration(cpUrl, { isAttached });
     void loadStarredWebsites();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'sync') return;
+    if (areaName !== 'local') return;
     if (
         changes.dialoguesToken ||
         changes.dialoguesResourceId ||
         changes._grantQueryProcessed
     ) {
-        chrome.storage.sync.get(['dialoguesToken', 'dialoguesResourceId'], updateAttachUI);
+        installationStorage.get(['dialoguesToken', 'dialoguesResourceId'], updateAttachUI);
     }
 });

@@ -1,3 +1,4 @@
+import { installationStorage } from './lib/installationStorage.js';
 console.log('[BACKGROUND] Service worker started');
 import { captureActor, actorBadge, handleActorMessage, bindPending } from './lib/actorRuntime.js';
 import { PendingActivity } from './lib/pendingActivity.js';
@@ -47,9 +48,9 @@ function initFromStorage() {
 async function setDialoguesErrorBadge(show) {
     try {
         if (show) {
-            await chrome.storage.sync.set({ dialoguesConnectionExpired: true });
+            await installationStorage.set({ dialoguesConnectionExpired: true });
         } else {
-            await chrome.storage.sync.remove(['dialoguesConnectionExpired']);
+            await installationStorage.remove(['dialoguesConnectionExpired']);
         }
         await refreshDialoguesBadge();
     } catch (e) {
@@ -61,9 +62,9 @@ async function setDialoguesErrorBadge(show) {
 async function setDialoguesEngineWarningBadge(show) {
     try {
         if (show) {
-            await chrome.storage.sync.set({ dialoguesEngineWarning: true });
+            await installationStorage.set({ dialoguesEngineWarning: true });
         } else {
-            await chrome.storage.sync.remove(['dialoguesEngineWarning']);
+            await installationStorage.remove(['dialoguesEngineWarning']);
         }
         await refreshDialoguesBadge();
     } catch (e) {
@@ -77,7 +78,7 @@ async function refreshDialoguesBadge() {
         if (typeof chrome.action === 'undefined') return;
         const tabs = await chrome.tabs.query({});
         await Promise.all(tabs.map(tab => actorBadge(tab.id)));
-        const { dialoguesConnectionExpired, dialoguesEngineWarning } = await chrome.storage.sync.get({
+        const { dialoguesConnectionExpired, dialoguesEngineWarning } = await installationStorage.get({
             dialoguesConnectionExpired: false,
             dialoguesEngineWarning: false
         });
@@ -108,7 +109,7 @@ applyStoredErrorBadge();
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'sync') initFromStorage(); });
 // When connection-expired or engine-warning is cleared, refresh badge.
 chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'sync') return;
+    if (areaName !== 'local') return;
     const expiredCleared = 'dialoguesConnectionExpired' in changes && changes.dialoguesConnectionExpired.newValue === undefined;
     const engineWarningCleared = 'dialoguesEngineWarning' in changes && changes.dialoguesEngineWarning.newValue === undefined;
     if (expiredCleared || engineWarningCleared) {
@@ -156,6 +157,10 @@ async function applyToposIngestResult(result, sourceId, recordCount = 1) {
 
 async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin', delivered = {} }) {
     if (isBridgePage(record.url)) return { topos: { sent: false, reason: 'not_attached' } };
+    if (record.device_name == null || record.device_name === '') {
+        const { device_name = '' } = await installationStorage.get({ device_name: '' });
+        record.device_name = device_name;
+    }
     const results = await dispatchRecord({ sourceId, record, supabaseTable, delivered });
     await recordBridgeDelivery(sourceId, [record], results.topos || {});
     await applyToposIngestResult(results.topos, sourceId);
@@ -197,12 +202,12 @@ function closeApprovalTab(tabId) {
         if (chrome.runtime.lastError) {
             console.log('[BACKGROUND] Approval tab already closed:', chrome.runtime.lastError.message);
         }
-        chrome.storage.sync.remove(['_approvalTabId']);
+        installationStorage.remove(['_approvalTabId']);
     });
 }
 
 async function exchangeGrantCodeInBackground(code, state, tabId) {
-    const base = await chrome.storage.sync.get({
+    const base = await installationStorage.get({
         _grantPendingState: '',
         _grantPkceVerifier: ''
     });
@@ -221,13 +226,13 @@ async function exchangeGrantCodeInBackground(code, state, tabId) {
         });
         await setDialoguesErrorBadge(false);
         await setDialoguesEngineWarningBadge(false);
-        await chrome.storage.sync.set({
+        await installationStorage.set({
             dialoguesToken: runToken,
             dialoguesResourceId: resourceId,
             dialoguesControlPlaneUrl: controlPlaneUrl,
             _grantQueryProcessed: true
         });
-        await chrome.storage.sync.remove(['_grantPendingState', '_grantPkceVerifier']);
+        await installationStorage.remove(['_grantPendingState', '_grantPkceVerifier']);
         console.log('[BACKGROUND] Token/resource_id stored from Grant Access exchange');
         closeApprovalTab(tabId);
         chrome.runtime.openOptionsPage?.();
@@ -267,7 +272,7 @@ function handleGrantRedirectUrl(url, tabId) {
         const resource_id = params.get('resource_id');
         if (access_token && resource_id) {
             console.log('[BACKGROUND] Storing token/resource_id from redirect hash');
-            chrome.storage.sync.get([], async () => {
+            installationStorage.get([], async () => {
                 const toSet = {
                     dialoguesToken: access_token,
                     dialoguesResourceId: resource_id,
@@ -276,7 +281,7 @@ function handleGrantRedirectUrl(url, tabId) {
                 };
                 await setDialoguesErrorBadge(false);
                 await setDialoguesEngineWarningBadge(false);
-                chrome.storage.sync.set(toSet, () => {
+                installationStorage.set(toSet, () => {
                     console.log('[BACKGROUND] ✓ Token and resource_id stored from redirect');
                     closeApprovalTab(tabId);
                 });
@@ -327,7 +332,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     }
 
     // ─── get device_name from storage ────────────────────────────────────────────
-    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+    const { device_name = '' } = await installationStorage.get({ device_name: '' });
 
     // ─── build your record ───────────────────────────────────────────────────────
     const record = {
@@ -374,7 +379,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         }
 
         // Get device_name from storage
-        const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+        const { device_name = '' } = await installationStorage.get({ device_name: '' });
 
         // Build your record (tab switch = revisit, so we send as browser_visits with transition_type tab_activated)
         const record = {
@@ -404,7 +409,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 async function handleStarPageMessage(msg, sender) {
     console.log('[STAR_PAGE] Received STAR_PAGE message:', msg);
 
-    const { device_name = '' } = await chrome.storage.sync.get({ device_name: '' });
+    const { device_name = '' } = await installationStorage.get({ device_name: '' });
 
     let tabInfo = {};
     if (msg.tab_id == null && sender?.tab?.id) {

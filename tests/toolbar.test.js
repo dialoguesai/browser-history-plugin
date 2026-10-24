@@ -60,7 +60,7 @@ test('expired lease and newer human presentation cannot retain an agent cursor',
     assert.ok(icons.get(5).path);
     assert.equal(badges.get(5), '');
     assert.equal(titles.get(5), 'TOPOS · You');
-    await chrome.storage.sync.set({ dialoguesConnectionExpired: true });
+    await chrome.storage.local.set({ dialoguesConnectionExpired: true });
     await actorBadge(5, { kind: 'human' });
     assert.equal(badges.get(5), '!');
     assert.ok(icons.get(5).path);
