@@ -63,6 +63,14 @@
       "matches": [
         "<all_urls>"
       ]
+    },
+    {
+      "resources": [
+        "options.html"
+      ],
+      "matches": [
+        "https://cp.logu3s.com/*"
+      ]
     }
   ]
 }

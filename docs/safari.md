@@ -28,7 +28,10 @@ control-plane candidate validates the same UUID origin and exact options path;
 other hosts, queries, fragments and paths are refused. Existing public-PKCE,
 registration-key, rate and install-count checks still apply. Chrome registration
 is unchanged. Safari then uses the normal browser-tab Grant Access flow and
-checks OAuth state before exchange.
+checks OAuth state before exchange. Its options callback is web-accessible only
+from `https://cp.logu3s.com`; a custom control-plane deployment must add its exact
+origin to that manifest entry. The callback rejects missing or mismatched state
+before exchanging a code.
 
 The deployed server must include this patch before Safari can attach. Signing
 the app does not register callbacks or preserve new fields in an older node.
@@ -64,6 +67,8 @@ runtime and notarization. A locally signed build is not automatically notarized
 or accepted for distribution. A signed package and the temporary development
 extension are separate installs; test the signed package's own permissions,
 callback registration and normal owner grant before calling it released.
+
+Callback navigation: [WebExtensions web-accessible resources](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/web_accessible_resources).
 
 Sources: [Apple: creating a Safari web extension](https://developer.apple.com/documentation/safariservices/creating-a-safari-web-extension),
 [Apple: distributing a Safari web extension](https://developer.apple.com/documentation/safariservices/distributing-your-safari-web-extension).
