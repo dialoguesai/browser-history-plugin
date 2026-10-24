@@ -40,6 +40,14 @@ Your browser already keeps browsing history. You can search it, scroll it, and r
 
 ---
 
+## Browser controller attribution (3.1 candidate)
+
+Choose who controls each tab, retain the agent/provider and parent conversation,
+and distinguish human, AI/bot and unresolved browser activity in TOPOS.
+[Setup and integration contract](docs/browser-attribution.md) · [Tested browser support](docs/browser-support.md).
+The coordinated TOPOS node/UI changes are required for downstream filtering and
+personal-interest exclusion. This candidate is not yet a deployed release.
+
 ## What it captures
 
 When Topos is attached, the extension sends structured events to your node:
@@ -158,3 +166,8 @@ Licensed under the [Apache License, Version 2.0](LICENSE).
 ## Version
 
 **3.0.2** — Dialogues Browser History (Manifest V3)
+
+
+## Toolbar artwork
+
+The toolbar uses its own transparent `icons/toolbar-source.png`, with PNG exports at 16, 20, 24, 32, 40, 48, 64, and 128 pixels for different display scales. The full app icons remain separate. To regenerate toolbar sizes, install Pillow (`python3 -m pip install Pillow`) and run `python3 scripts/make-icons.py`.

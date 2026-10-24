@@ -1,4 +1,6 @@
 console.log('[BACKGROUND] Service worker started');
+import { captureActor, actorBadge, handleActorMessage, bindPending } from './lib/actorRuntime.js';
+import { PendingActivity } from './lib/pendingActivity.js';
 import { getControlPlaneUrl } from './lib/config.js';
 import { buildSkipList, shouldSkipHostname } from './lib/skipDomains.js';
 import { dispatchRecord } from './lib/dispatch.js';
@@ -72,6 +74,8 @@ async function setDialoguesEngineWarningBadge(show) {
 async function refreshDialoguesBadge() {
     try {
         if (typeof chrome.action === 'undefined') return;
+        const tabs = await chrome.tabs.query({});
+        await Promise.all(tabs.map(tab => actorBadge(tab.id)));
         const { dialoguesConnectionExpired, dialoguesEngineWarning } = await chrome.storage.sync.get({
             dialoguesConnectionExpired: false,
             dialoguesEngineWarning: false
@@ -100,7 +104,7 @@ async function applyStoredErrorBadge() {
 initFromStorage();
 applyStoredErrorBadge();
 // re‑run whenever options change
-chrome.storage.onChanged.addListener(initFromStorage);
+chrome.storage.onChanged.addListener((changes, area) => { if (area === 'sync') initFromStorage(); });
 // When connection-expired or engine-warning is cleared, refresh badge.
 chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'sync') return;
@@ -149,8 +153,8 @@ async function applyToposIngestResult(result, sourceId, recordCount = 1) {
     }
 }
 
-async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin' }) {
-    const results = await dispatchRecord({ sourceId, record, supabaseTable });
+async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin', delivered = {} }) {
+    const results = await dispatchRecord({ sourceId, record, supabaseTable, delivered });
     await applyToposIngestResult(results.topos, sourceId);
     if (results.supabase?.sent) {
         console.log('[SUPABASE] Logged', sourceId, record.url?.slice?.(0, 60));
@@ -159,6 +163,22 @@ async function ingestRecord({ sourceId, record, supabaseTable = 'browserplugin' 
     }
     return results;
 }
+
+// Pending visits are an outbox, not a change to their event time.
+const pendingActivity = new PendingActivity(chrome.storage.session, ingestRecord);
+bindPending(pendingActivity);
+async function queueVisit(record, documentId = null) {
+    record.capture_id = crypto.randomUUID();
+    record.actor = await captureActor(record.tab_id, {}, Date.parse(record.visited_at), documentId);
+    await pendingActivity.add({ sourceId: 'browser_visits', record, documentId });
+    await pendingActivity.resolve(record.tab_id, await captureActor(record.tab_id, {}, Date.now(), documentId), documentId);
+    setTimeout(() => pendingActivity.flush().catch(console.warn), 2600);
+}
+chrome.alarms.create('flush-browser-activity', { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name === 'flush-browser-activity') pendingActivity.flush().catch(console.warn);
+});
+pendingActivity.flush().catch(console.warn);
 
 const processedGrantRedirectUrls = new Set();
 
@@ -302,13 +322,13 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     // ─── build your record ───────────────────────────────────────────────────────
     const record = {
         url,
-        visited_at: new Date().toISOString(),
+        visited_at: new Date(details.timeStamp).toISOString(),
         title: tab.title,
         favicon_url: tab.favIconUrl,
         tab_id: details.tabId,
-        window_id: details.windowId,
+        window_id: tab.windowId,
         incognito: tab.incognito,
-        transition_type: details.transitionType,
+        transition_type: 'page_loaded',
         hostname,
 
         // ─── new fields ────────────────────────────────────────────────────────────
@@ -322,16 +342,13 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
         referred_by: null
     };
 
-    const results = await ingestRecord({ sourceId: 'browser_visits', record });
-    if (!results.topos?.sent && !results.supabase?.sent) {
-        console.log(
-            '[APP_INGEST] No sink configured — attach Dialogues (Topos tab) and/or set Supabase in Options.'
-        );
-    }
+    await queueVisit(record, details.documentId);
 });
 
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    const activatedAt = new Date().toISOString();
+    await actorBadge(activeInfo.tabId);
     try {
         const tab = await chrome.tabs.get(activeInfo.tabId);
         if (!tab.url || tab.url === 'about:blank') return;
@@ -351,7 +368,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         // Build your record (tab switch = revisit, so we send as browser_visits with transition_type tab_activated)
         const record = {
             url: tab.url,
-            visited_at: new Date().toISOString(),
+            visited_at: activatedAt,
             title: tab.title,
             favicon_url: tab.favIconUrl,
             tab_id: tab.id,
@@ -367,7 +384,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
             referred_by: null
         };
 
-        await ingestRecord({ sourceId: 'browser_visits', record });
+        await queueVisit(record);
     } catch (err) {
         console.error('Error handling tab activation', err);
     }
@@ -397,9 +414,11 @@ async function handleStarPageMessage(msg, sender) {
     }
 
     const record = {
+        capture_id: msg.capture_id || crypto.randomUUID(),
+        actor: msg._actor,
         url: msg.url,
-        starred_at: new Date().toISOString(),
-        visited_at: new Date().toISOString(),
+        starred_at: msg.visited_at || new Date().toISOString(),
+        visited_at: msg.visited_at || new Date().toISOString(),
         device_name,
         title: msg.title,
         favicon_url: msg.favicon_url,
@@ -423,7 +442,7 @@ async function handleClickOrHighlightMessage(msg, sender) {
     const eventType = msg.event_type || msg.type;
     let tabInfo = {};
     try {
-        if (sender.tab?.id) {
+        if (sender.tab?.id != null) {
             const t = await chrome.tabs.get(sender.tab.id);
             tabInfo = {
                 tab_id: t.id,
@@ -440,6 +459,8 @@ async function handleClickOrHighlightMessage(msg, sender) {
     }
 
     const record = {
+        capture_id: msg.capture_id || crypto.randomUUID(),
+        actor: msg._actor,
         url: msg.url,
         visited_at: msg.visited_at,
         title: msg.title,
@@ -472,7 +493,7 @@ async function handleVideoPlayMessage(msg, sender) {
 
     let tabInfo = {};
     try {
-        if (sender.tab?.id) {
+        if (sender.tab?.id != null) {
             const t = await chrome.tabs.get(sender.tab.id);
             tabInfo = {
                 tab_id: t.id,
@@ -489,6 +510,8 @@ async function handleVideoPlayMessage(msg, sender) {
     }
 
     const record = {
+        capture_id: msg.capture_id || crypto.randomUUID(),
+        actor: msg._actor,
         url: msg.url,
         visited_at: msg.visited_at,
         title: msg.title,
@@ -523,13 +546,27 @@ async function handleContentScriptMessage(msg, sender) {
     }
 }
 
+async function captureContentMessage(msg, sender) {
+    if (sender.id !== chrome.runtime.id || !sender.tab || sender.frameId !== 0) return;
+    const occurred = Date.parse(msg.visited_at);
+    const at = Number.isFinite(occurred) && Math.abs(Date.now() - occurred) < 60000 ? occurred : Date.now();
+    const actor = await captureActor(sender.tab.id, msg.automation_signals || {}, at, sender.documentId);
+    await pendingActivity.resolve(sender.tab.id, actor, sender.documentId);
+    await actorBadge(sender.tab.id, actor);
+    const safe = { ...msg, capture_id: crypto.randomUUID(), _actor: actor, tab_id: undefined };
+    await handleContentScriptMessage(safe, sender);
+}
+
 // MV3: return true so the worker stays alive until async ingest completes; must call sendResponse.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    handleContentScriptMessage(msg, sender)
-        .then(() => sendResponse({ ok: true }))
+    const task = (msg.type?.startsWith('ACTOR_') || msg.type === 'AUTOMATION_HINT')
+        ? handleActorMessage(msg, sender)
+        : captureContentMessage(msg, sender);
+    task
+        .then(result => sendResponse(result || { ok: true }))
         .catch((err) => {
             console.error('[CONTENT_EVENT] Handler failed:', err);
-            sendResponse({ ok: false });
+            sendResponse({ ok: false, error: err.message });
         });
     return true;
 });
@@ -573,5 +610,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         opener_tab_id: tab.openerTabId ?? null
     };
 
+    payload._actor = await captureActor(tab.id);
+    payload.capture_id = crypto.randomUUID();
     await handleStarPageMessage(payload, { tab });
 });

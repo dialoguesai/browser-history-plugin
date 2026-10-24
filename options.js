@@ -327,7 +327,7 @@ saveButton.addEventListener('click', () => {
     const device_name = deviceNameInput.value.trim();
     const showStarButton = !!showStarButtonInput.checked;
     chrome.storage.sync.set(
-        { supabaseUrl, anonKey, skipDomains, device_name, showStarButton, dialoguesControlPlaneUrl: getControlPlaneUrl() },
+        { supabaseUrl, anonKey, supabaseActorColumns: document.getElementById('supabaseActorColumns').checked, skipDomains, device_name, showStarButton, dialoguesControlPlaneUrl: getControlPlaneUrl() },
         () => {
             // Saving re-arms the Supabase sink after an auth/RLS auto-disable.
             chrome.storage.sync.remove('supabaseSinkDisabledReason');
@@ -343,22 +343,12 @@ saveButton.addEventListener('click', () => {
 
 async function loadStarredWebsites() {
     const container = document.getElementById('starredWebsites');
-    let client = null;
-    try {
-        const { getSupabaseClient } = await import('./lib/supabaseIngest.js');
-        client = await getSupabaseClient();
-    } catch (e) {
-        console.warn('[OPTIONS] Supabase client unavailable:', e);
-    }
-    if (!client) {
+    const { listStarredWebsites } = await import('./lib/supabaseIngest.js');
+    const { configured, data, error } = await listStarredWebsites();
+    if (!configured) {
         container.textContent = 'Configure Supabase to list starred sites here.';
         return;
     }
-    const { data, error } = await client
-        .from('starred_websites')
-        .select('*')
-        .order('starred_at', { ascending: false })
-        .limit(50);
     if (error) {
         container.textContent = 'Error loading starred websites.';
         return;
@@ -370,7 +360,13 @@ async function loadStarredWebsites() {
     const list = document.createElement('ul');
     data.forEach((item) => {
         const li = document.createElement('li');
-        li.innerHTML = `<a href="${item.url}" target="_blank">${item.title || item.url}</a>`;
+        const link = document.createElement('a');
+        try { if (!['http:', 'https:'].includes(new URL(item.url).protocol)) return; } catch { return; }
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = item.title || item.url;
+        li.appendChild(link);
         list.appendChild(li);
     });
     container.replaceChildren(list);
@@ -380,6 +376,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
     void parseGrantRedirectQuery();
     const items = await chrome.storage.sync.get({
+        supabaseActorColumns: false,
         supabaseUrl: '',
         anonKey: '',
         skipDomains: [],
@@ -389,6 +386,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         dialoguesResourceId: '',
         supabaseSinkDisabledReason: ''
     });
+    document.getElementById('supabaseActorColumns').checked = items.supabaseActorColumns;
     urlInput.value = items.supabaseUrl;
     keyInput.value = items.anonKey;
     if (items.supabaseSinkDisabledReason) {
