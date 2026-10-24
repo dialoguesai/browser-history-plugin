@@ -24,15 +24,35 @@ TOPOS query read back the same URL and event timestamp from the running 1.5.20
 node. That released node does not preserve the new actor fields: it proves live
 visit delivery, not deployed canonical actor preservation.
 
-Safari's owner-grant flow failed at callback registration. The deployed server
-accepts Chromium IDs/callbacks, while Safari supplies a UUID extension origin
-and a different bundle ID. The candidate fixes registration and strict callback
-validation on both sides. Live Safari delivery remains blocked until deployment.
-Apple signing does not change this callback contract.
+Safari attachment now passes after deploying the strict callback fix in
+[control-plane #178](https://github.com/dialoguesai/control-plane/pull/178).
+Its normal owner grant completed and settings displayed **Connected to Topos**.
+The same automatic handoff supplied Codex/OpenAI and the real conversation parent.
+Thirteen actual captures carried that identity and received HTTP 202 queue
+acceptance. Authenticated TOPOS 1.5.21 read-back subsequently matched one visit
+and five interactions by exact URL, source, timestamp and record ID. The other
+accepted records were not included in this read-back proof. Queue acceptance
+alone is not treated as delivery. The installed node's canonical parser still
+does not retain the actor envelope; no node update was performed for this test.
+
+The live test exposed a deadlock when handoff waited on pending delivery while
+delivery waited on the handoff queue. The bridge now acknowledges and leaves
+its queue before resolving pending attribution. A regression reproduced the
+failure before the fix; all 20 extension tests pass with the fix. The final live
+Safari run used this corrected build.
 
 The cursor follow-up was verified in Safari: agent tab → unassigned tab → agent
 tab → end session. The visual pointer followed the active tab, the question mark
 was absent, and the recorded tab activation still carried the exact agent parent.
+
+The owner confirmed switching between the agent tab and their own separate tab
+showed/cleared the pointer correctly. On the former AI tab, ending the session
+cleared the pointer; explicitly selecting Me then displayed **You are now the
+controller** and **TOPOS · You**. Codex operated this explicit mode check, so it
+is not evidence of automatic human detection. The same-tab regression verifies
+that queued AI actions retain their parent, subsequent human actions omit agent
+identity, and stale agent capabilities cannot override the human selection.
+Live human-action payload delivery was not verified by that UI check.
 
 ## Candidate-node acceptance, without updating the running node
 
@@ -50,8 +70,6 @@ an ordinary local website and the extension's implemented handoff protocol.
 
 ## Remaining acceptance
 
-- Deploy the strict Safari callback fix, then complete its normal owner grant and
-  read back a real Safari capture from TOPOS.
 - Deploy the coordinated node/UI changes before relying on live canonical actor
   retention, parent navigation, AI filtering or personal-interest exclusion.
 - Verify the signed Safari package, restart behavior and additional integrations.

@@ -24,7 +24,7 @@ The plugin registers that exact callback (case preserved) using:
 ```
 
 POST to `/v1/apps/browser-history-plugin/extension-install/redirects`. The
-control-plane candidate validates the same UUID origin and exact options path;
+control plane validates the same UUID origin and exact options path;
 other hosts, queries, fragments and paths are refused. Existing public-PKCE,
 registration-key, rate and install-count checks still apply. Chrome registration
 is unchanged. Safari then uses the normal browser-tab Grant Access flow and
@@ -33,9 +33,12 @@ from `https://cp.logu3s.com`; a custom control-plane deployment must add its exa
 origin to that manifest entry. The callback rejects missing or mismatched state
 before exchanging a code.
 
-The deployed server must include this patch before Safari can attach. Signing
-the app does not register callbacks or preserve new fields in an older node.
-The plugin can be tested with its local receipt verifier before server deployment.
+The production callback patch was deployed and merged as control-plane PR #178
+on 2026-10-24. A temporary Safari 27.0.1 extension completed attachment and sent
+real automatically attributed activity; exact visits/interactions were read back
+from TOPOS 1.5.21 after initial queue acceptance. Signing the app does not register
+callbacks or preserve new fields in an older node. Custom servers must include
+the same patch. The local verifier can test payloads before server deployment.
 
 ## Build a signed macOS app
 

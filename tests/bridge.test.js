@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { startBridge, codexIdentity } from '../agent-bridge/server.mjs';
+import { PendingActivity } from '../lib/pendingActivity.js';
 
 const event = () => ({ listeners: [], addListener(fn) { this.listeners.push(fn); } });
 const memory = () => {
@@ -18,7 +19,7 @@ globalThis.chrome = {
     action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {} }
 };
 const { bridgeLocation, connectAgentTab, recordBridgeDelivery } = await import('../lib/agentBridge.js');
-const { captureActor, handleActorMessage } = await import('../lib/actorRuntime.js');
+const { captureActor, handleActorMessage, bindPending } = await import('../lib/actorRuntime.js');
 const actor = codexIdentity({ CODEX_THREAD_ID: '12345678-1234-1234-1234-123456789abc' });
 const path = '/.well-known/topos-agent/v1/';
 const post = (bridge, endpoint, bearer, body, headers = {}) => fetch(bridge.origin + path + endpoint, { method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json', 'X-Topos-Agent-Bridge': '1', ...headers }, body: JSON.stringify(body) });
@@ -75,12 +76,30 @@ test('remote pages, bad hosts, expired tickets and mismatched receipts are rejec
     assert.equal((await post(bridge, 'claim', ticket, { client_id: randomUUID() })).status, 410);
 });
 
-test('manual human handoff cannot be undone by a stale end capability', async t => {
+test('same-tab human handoff preserves queued agent records and rejects stale control', async t => {
     const bridge = await startBridge({ actor, target: 'https://example.com/' });
-    t.after(() => bridge.close());
+    t.after(() => { bindPending(null); bridge.close(); });
+    let now = 100;
+    const sent = [];
+    const pending = new PendingActivity(memory(), async item => {
+        sent.push(JSON.parse(JSON.stringify(item.record)));
+        return { topos: { sent: true } };
+    }, { now: () => now, holdMs: 50 });
+    bindPending(pending);
     urls.set(10, bridge.launchUrl);
     await connectAgentTab(10, bridge.launchUrl);
+    const before = await captureActor(10);
+    await pending.add({ record: { capture_id: 'before-handoff', tab_id: 10, actor: before } });
     await handleActorMessage({ type: 'ACTOR_SET', tab_id: 10, actor: { kind: 'human' } }, { id: 'plugin', url: 'chrome-extension://plugin/controller.html' });
+    const after = await captureActor(10);
+    await pending.add({ record: { capture_id: 'after-handoff', tab_id: 10, actor: after } });
+    now = 151;
+    await pending.flush();
+    assert.equal(sent[0].actor.kind, 'agent');
+    assert.equal(sent[0].actor.conversation_id, actor.conversation_id);
+    assert.equal(sent[1].actor.kind, 'human');
+    for (const field of ['provider', 'name', 'conversation_source', 'conversation_id']) assert.equal(sent[1].actor[field], undefined);
+    assert.equal((await captureActor(11)).kind, 'unknown');
     urls.set(10, bridge.endUrl);
     await assert.rejects(connectAgentTab(10, bridge.endUrl), /no longer owns/);
     assert.equal((await captureActor(10)).kind, 'human');
@@ -88,4 +107,27 @@ test('manual human handoff cannot be undone by a stale end capability', async t 
     await assert.rejects(connectAgentTab(10, bridge.launchUrl), /has ended/);
     assert.equal((await status(bridge)).ended, true);
     assert.equal((await captureActor(10)).kind, 'human');
+});
+
+test('handoff acknowledges before pending delivery waits on the bridge queue', async t => {
+    const bridge = await startBridge({ actor, target: 'https://example.com/', verifyOrigin: 'https://example.com' });
+    t.after(() => { bindPending(null); bridge.close(); });
+    bindPending({ resolve: async (tabId, identity) => {
+        await recordBridgeDelivery('browser_visits', [{
+            capture_id: randomUUID(), tab_id: tabId, url: 'https://example.com/pending', actor: identity
+        }], { sent: true, status: 200 });
+    } });
+    urls.set(20, bridge.launchUrl);
+    let timer;
+    try {
+        const result = await Promise.race([
+            connectAgentTab(20, bridge.launchUrl).then(() => 'complete'),
+            new Promise(resolve => { timer = setTimeout(() => resolve('deadlock'), 1500); })
+        ]);
+        assert.equal(result, 'complete');
+        const evidence = await status(bridge);
+        assert.equal(evidence.ack.actor.conversation_id, actor.conversation_id);
+        assert.equal(evidence.receipts.length, 1);
+        assert.equal(evidence.receipts[0].delivery.status, 200);
+    } finally { clearTimeout(timer); }
 });
