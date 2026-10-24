@@ -10,6 +10,9 @@ identity transfer, payload capture, and a deployed node's canonical behavior.
 | Dia (Chromium) | Not tested with the new handoff | Prior unlabelled Example.com activity observed in TOPOS | Group/debugging UI alone cannot supply a parent ID. |
 | Edge / Arc / other Chromium | Not tested with this candidate | Not tested | No live compatibility claim. |
 
+The pointer was refined in two design passes at 16, 20, 24 and 32 CSS pixels
+on light and dark backgrounds: a larger pure-black center, a white outline drawn
+last so it stays visible, and a black outer edge for light toolbars. The refined
 Chrome and Safari cursors were visually verified on an agent tab, absent on an unassigned
 tab, present again when returning to the agent tab, and cleared after automatic
 session end. Captured tab-switch records retained the original agent/session
