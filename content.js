@@ -8,7 +8,6 @@ function getPrefs() {
         try {
             if (!chrome.runtime?.id) {
                 resolve({
-                    device_name: '',
                     user_id: null,
                     referred_by: document.referrer || null
                 });
@@ -16,7 +15,6 @@ function getPrefs() {
             }
             chrome.storage.sync.get(
                 {
-                    device_name: '',
                     user_id: null,
                     referred_by: document.referrer || null
                 },
@@ -24,7 +22,6 @@ function getPrefs() {
             );
         } catch (err) {
             resolve({
-                device_name: '',
                 user_id: null,
                 referred_by: document.referrer || null
             });

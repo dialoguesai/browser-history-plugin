@@ -569,7 +569,10 @@ async function captureContentMessage(msg, sender) {
     const actor = await captureActor(sender.tab.id, msg.automation_signals || {}, at, sender.documentId);
     await pendingActivity.resolve(sender.tab.id, actor, sender.documentId);
     await actorBadge(sender.tab.id, actor);
-    const safe = { ...msg, capture_id: crypto.randomUUID(), _actor: actor, tab_id: undefined };
+    // An old content script may still carry a synchronized device name after
+    // an upgrade. The browser's local name is authoritative at capture time.
+    const { device_name = '' } = await installationStorage.get({ device_name: '' });
+    const safe = { ...msg, device_name, capture_id: crypto.randomUUID(), _actor: actor, tab_id: undefined };
     await handleContentScriptMessage(safe, sender);
 }
 
