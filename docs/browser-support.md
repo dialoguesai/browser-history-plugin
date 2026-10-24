@@ -5,7 +5,7 @@ identity transfer, payload capture, and a deployed node's canonical behavior.
 
 | Environment | Automatic Codex identity + real parent | Capture / delivery | Limits |
 |---|---|---|---|
-| Chrome 155.0.8059.86 | Passed using the bundled local handoff, no identity form entry | Actual attributed visit captured; normal TOPOS write succeeded; matching URL/time read back from running TOPOS 1.5.20 | Released node 1.5.20 does not preserve/expose the new actor envelope. Final cursor tab-switch/end check passed. |
+| Chrome 155.0.8059.86 | Passed using the bundled local handoff, no identity form entry | Final queue-fix build reloaded and verified: two visits and one click returned HTTP 200 and matched exact live TOPOS 1.5.21 read-back | Renewed account grant required after Safari attachment revoked the earlier Chrome grant. Released node does not preserve canonical actor attribution. Final cursor tab-switch/end check passed. |
 | Safari 27.0.1 | Passed using the same helper, no identity form entry; retained across navigation/tab replacement | Attach Dialogues passed after callback deployment; HTTP 202 accepted into queue, followed by exact live TOPOS 1.5.21 read-back of one visit and five interactions | The released node does not preserve canonical actor attribution. Live proof used a temporary extension, not the signed package. |
 | Dia (Chromium) | Not tested with the new handoff | Prior unlabelled Example.com activity observed in TOPOS | Group/debugging UI alone cannot supply a parent ID. |
 | Edge / Arc / other Chromium | Not tested with this candidate | Not tested | No live compatibility claim. |
@@ -42,6 +42,13 @@ The Safari-only callback fix was deployed and merged as
 The owner also confirmed that switching from the AI tab to their own Safari tab
 cleared the pointer. Explicit same-tab Me mode was checked separately in the
 live popup; this is not automatic human takeover detection.
+
+Known server limitation: the legacy owner-grant flow keeps one grant per app
+and TOPOS resource. Attaching Safari revoked Chrome's previous grant; after
+renewing Chrome's grant, its final test passed. The same server rule applies in
+the other direction. Each browser works individually, but simultaneous independent
+Chrome/Safari attachment is not supported by that legacy flow. A server change
+must distinguish installations without weakening consent or revocation.
 
 Still unverified: a signed/notarized Safari distribution, a complete browser restart cycle,
 real child-tab inheritance and approved external-controller integrations.

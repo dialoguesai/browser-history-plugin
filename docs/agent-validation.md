@@ -24,6 +24,24 @@ TOPOS query read back the same URL and event timestamp from the running 1.5.20
 node. That released node does not preserve the new actor fields: it proves live
 visit delivery, not deployed canonical actor preservation.
 
+The final queue-fix build was then reloaded in Chrome and tested again against
+TOPOS 1.5.21. Its saved grant initially returned HTTP 403: the server reported
+that the permission was no longer approved. Production logs confirmed Safari's
+attachment had revoked one earlier browser-history grant as a duplicate. The
+owner renewed Chrome's account grant; no agent identity fields were entered.
+Two visits and one click then returned HTTP 200 (not queued or in flight), and
+all three were read back by exact URL, source, timestamp and record ID. The
+same real conversation parent was present in every outgoing record, and the
+helper confirmed the session ended. Initial failures remain in the private
+receipt; they are not counted as successful delivery.
+
+This exposes a server limitation separate from attribution: legacy self-grant
+approval revokes sibling grants for the same app/resource, without identifying
+the browser installation. Chrome and Safari each pass individually; simultaneous
+independent attachment needs an installation-aware grant fix. Renewing one
+browser's grant can invalidate the other. Canonical actor retention and node
+release plans are unchanged by this verification.
+
 Safari attachment now passes after deploying the strict callback fix in
 [control-plane #178](https://github.com/dialoguesai/control-plane/pull/178).
 Its normal owner grant completed and settings displayed **Connected to Topos**.
