@@ -15,10 +15,15 @@ ability to declare its conversation. Codex's observed group/debugging UI alone
 cannot supply the parent ID. Cooperative explicit declaration is required for
 named, conversation-linked attribution. Unknown actions stay unknown.
 
-The tested support is **explicit AI-controlled tab mode** in Chrome and Safari,
-with the narrower Chrome checks described above. It is not automatic provider or
-conversation discovery, a signed Safari distribution, or a live TOPOS delivery
-certification. Both browser test installations stayed unattached to TOPOS.
+**Autonomous agent use is not yet certified in either browser.** Chrome's check
+was operator-assisted: the owner filled and submitted the identity form. Safari's
+check did include the agent filling and submitting the form through native UI
+automation after installation and permissions were approved by the owner.
+This demonstrates a cooperative UI declaration path in Safari, not automatic
+agent detection, discovery of the agent's real parent conversation, a signed
+Safari distribution, or browser-to-TOPOS delivery. Both test installations stayed
+unattached to TOPOS and used a synthetic parent reference. See the exact
+[agent-operation evidence and gaps](agent-validation.md).
 The 11 extension tests cover actor validation, event-time history, replacements,
 leases, sender validation, group observation and delayed delivery/retries.
 
