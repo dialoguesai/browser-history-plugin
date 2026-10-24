@@ -20,7 +20,10 @@ test('migration preserves attachment once, then device names and grants stay ind
     const a = createInstallationStorage({ local: memory(), sync });
     const b = createInstallationStorage({ local: memory(), sync });
     assert.equal((await a.get('dialoguesToken')).dialoguesToken, 'legacy-grant');
-    assert.equal((await b.get('dialoguesToken')).dialoguesToken, 'legacy-grant');
+    // The first installation to migrate takes the synced credential and clears it from Chrome Sync, so a second
+    // device attaches with its own grant instead of sharing one nothing would ever revoke.
+    assert.deepEqual(await sync.get(['device_name', 'dialoguesToken', 'dialoguesResourceId']), {});
+    assert.equal((await b.get('dialoguesToken')).dialoguesToken, undefined);
     await a.set({ device_name: 'Personal computer', dialoguesToken: 'personal-grant' });
     await b.set({ device_name: 'Work computer', dialoguesToken: 'work-grant' });
     await sync.set({ device_name: 'Synced old client', dialoguesToken: 'synced-grant' });
