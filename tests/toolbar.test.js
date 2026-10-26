@@ -33,7 +33,7 @@ test('tab-specific pointer toggles without changing historical actor or parent',
     const at = Date.now();
     const declared = await assign(1, agent, 'controller_declared', { at, expires_at: at + 60000, controller: 'test' });
     await assign(2, { kind: 'human' }, 'manual', { at });
-    await actorBadge(3); // unassigned tab stays visually clean, without claiming human
+    await actorBadge(3); // ordinary tab uses the human default and a clean icon
     const before = await actors.history(1);
     // Repeated active-tab refreshes use per-tab presentation, not a global actor.
     for (const tabId of [2, 1, 3, 1, 2]) await actorBadge(tabId);
@@ -42,14 +42,16 @@ test('tab-specific pointer toggles without changing historical actor or parent',
     assert.equal(icons.get(3).path[16], 'icons/toolbar-16.png');
     assert.deepEqual([...badges.values()], ['', '', '']);
     assert.equal(titles.get(1), 'TOPOS · Codex (OpenAI)');
-    assert.equal((await captureActor(3)).kind, 'unknown');
+    assert.equal((await captureActor(3)).kind, 'human');
+    assert.equal((await captureActor(3)).method, 'default_human');
+    assert.equal(titles.get(3), 'TOPOS · You');
     assert.deepEqual(await actors.history(1), before);
     assert.equal(loads, 8); // cached across tabs and switches
     await actors.end(1, declared.session_id, 'test');
     await actorBadge(1);
     assert.ok(icons.get(1).path);
     assert.equal((await actors.snapshot(1, {}, at)).conversation_id, agent.conversation_id);
-    assert.equal((await actors.snapshot(1)).kind, 'unknown');
+    assert.equal((await actors.snapshot(1)).kind, 'human');
 });
 
 test('expired lease and newer human presentation cannot retain an agent cursor', async () => {

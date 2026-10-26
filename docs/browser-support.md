@@ -7,7 +7,7 @@ identity transfer, payload capture, and a deployed node's canonical behavior.
 |---|---|---|---|
 | Chrome 155.0.8059.86 | Passed using the bundled local handoff, no identity form entry | Final queue-fix build reloaded and verified: two visits and one click returned HTTP 200 and matched exact live TOPOS 1.5.21 read-back | Renewed account grant required after Safari attachment revoked the earlier Chrome grant. Released node does not preserve canonical actor attribution. Final cursor tab-switch/end check passed. |
 | Safari 27.0.1 | Passed using the same helper, no identity form entry; retained across navigation/tab replacement | Attach Dialogues passed after callback deployment; HTTP 202 accepted into queue, followed by exact live TOPOS 1.5.21 read-back of one visit and five interactions | The released node does not preserve canonical actor attribution. Live proof used a temporary extension, not the signed package. |
-| Chrome 155 driven by Claude in Chrome (Claude Desktop) | Not detected on its own: `navigator.webdriver` is false and its clicks are trusted events, so the tab stays unknown. Passed through the same local handoff with a Claude Code identity adapter (`claude_code_sessions`, real parent), no identity form entry | Visit and click returned HTTP 200 and matched exact live TOPOS 1.5.21 read-back | The bundled CLI's Claude adapter was then verified live the same way (visit and click, HTTP 200, exact read-back). |
+| Chrome 155 driven by Claude in Chrome (Claude Desktop) | Not detected on its own: `navigator.webdriver` is false and its clicks are trusted events, so detection alone cannot identify it. The current default is human unless the agent declares control. Passed through the same local handoff with a Claude Code identity adapter (`claude_code_sessions`, real parent), no identity form entry | Visit and click returned HTTP 200 and matched exact live TOPOS 1.5.21 read-back | The bundled CLI's Claude adapter was then verified live the same way (visit and click, HTTP 200, exact read-back). |
 | Dia (Chromium) | Not tested with the new handoff | Prior unlabelled Example.com activity observed in TOPOS | Group/debugging UI alone cannot supply a parent ID. |
 | Edge / Arc / other Chromium | Not tested with this candidate | Not tested | No live compatibility claim. |
 
@@ -17,8 +17,8 @@ last so it stays visible, and a black outer edge for light toolbars. The refined
 Chrome and Safari cursors were visually verified on an agent tab, absent on an unassigned
 tab, present again when returning to the agent tab, and cleared after automatic
 session end. Captured tab-switch records retained the original agent/session
-and parent. Human/unknown remain distinct in payloads despite sharing a clean
-icon. Normal browser permission/installation and owner account grants are still
+and parent. Ordinary tabs now default to human (`default_human`) with a clean icon; named
+agents and positive automation evidence retain their own attribution. Normal browser permission/installation and owner account grants are still
 required; they are not agent identity entry.
 
 Both browsers' real captured payloads passed the candidate node's ingestion,
@@ -27,7 +27,7 @@ personal-enrichment exclusion checks in an isolated database. This is replay
 acceptance, not evidence that those node changes are deployed.
 
 See [agent-operation evidence](agent-validation.md), [automatic handoff](agent-bridge.md)
-and [Safari packaging and callback setup](safari.md). The 24 extension tests
+and [Safari packaging and callback setup](safari.md). The 29 extension tests
 cover actor validation, event time, tab replacement, sender validation, delayed
 delivery, HTTP handoff (including a live-discovered pending-queue deadlock), OAuth state, per-tab cursor isolation, same-tab human handback without relabeling queued AI actions, installation-local credentials/names, and stale content-script device-name rejection.
 

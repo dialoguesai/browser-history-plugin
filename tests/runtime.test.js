@@ -29,13 +29,13 @@ test('web content and unapproved controllers cannot assert an identity', async (
 test('group observation never rewrites an earlier event; removal and human handoff work', async () => {
   title = '[TOPOS AI] ' + ['Codex', 'openai', 'codex_sessions', 'codex:test'].map(encodeURIComponent).join(' | ');
   await observeGroup(1);
-  assert.equal((await captureActor(1, {}, 99)).kind, 'unknown');
+  assert.equal((await captureActor(1, {}, 99)).kind, 'human');
   assert.equal((await captureActor(1, {}, 101)).conversation_id, 'codex:test');
   clock = 200;
   title = 'Ordinary human-editable title';
   await observeGroup(1);
   assert.equal((await captureActor(1, {}, 150)).kind, 'agent');
-  assert.equal((await captureActor(1, {}, 201)).kind, 'unknown');
+  assert.equal((await captureActor(1, {}, 201)).kind, 'human');
   title = '[TOPOS AI] ' + ['Codex', 'openai', 'codex_sessions', 'codex:new'].map(encodeURIComponent).join(' | ');
   clock = 300;
   await observeGroup(1);
@@ -64,5 +64,12 @@ test('browser replacement event keeps the named parent on the new tab', async ()
   assert.equal(after.kind, 'agent');
   assert.equal(after.session_id, before.actor.session_id);
   assert.equal(after.conversation_id, 'codex:test');
-  assert.equal((await captureActor(40)).kind, 'unknown');
+  assert.equal((await captureActor(40)).kind, 'human');
+});
+
+test('automation group hints still override the human default on an unassigned tab', async () => {
+  title = 'Agent research';
+  await handleActorMessage({ type: 'ACTOR_CONTROLLERS', controllers: [], groupNames: [title] }, ui);
+  await observeGroup(50);
+  assert.equal((await captureActor(50)).kind, 'automation');
 });

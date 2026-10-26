@@ -44,8 +44,9 @@ detection. The integration must be invoked before browser work. Other providers
 need an adapter that obtains their real source-scoped conversation identifiers;
 Codex and Claude Code are built in. Without the handoff, Claude in Chrome looks
 human to the extension: `navigator.webdriver` stays false and its clicks are
-trusted events, so its activity stays unknown. Unknown
-stays unknown when no declaration or positive signal exists.
+trusted events, so it receives the human default unless it cooperates with the
+handoff. The `default_human` method records the assumption; it is not universal
+bot detection. Use the handoff to retain the actual provider and parent.
 
 ## Verify before a node release
 
