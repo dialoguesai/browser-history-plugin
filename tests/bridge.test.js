@@ -65,7 +65,7 @@ test('real HTTP bridge automatically attributes one tab, records activity, survi
     const identity = await captureActor(1);
     assert.equal(identity.conversation_id, actor.conversation_id);
     assert.equal(identity.method, 'controller_declared');
-    assert.equal((await captureActor(2)).kind, 'unknown');
+    assert.equal((await captureActor(2)).kind, 'human');
     assert.equal((await status(bridge)).ack.actor.session_id, identity.session_id);
     // A second tab cannot claim the same capability. Retrying the first is safe.
     urls.set(2, bridge.launchUrl);
@@ -81,7 +81,7 @@ test('real HTTP bridge automatically attributes one tab, records activity, survi
     for (const listener of chrome.tabs.onReplaced.listeners) listener(3, 1);
     urls.set(3, bridge.endUrl);
     await connectAgentTab(3, bridge.endUrl);
-    assert.equal((await captureActor(3)).kind, 'unknown');
+    assert.equal((await captureActor(3)).kind, 'human');
     assert.equal((await status(bridge)).ended, true);
 });
 
@@ -124,7 +124,7 @@ test('same-tab human handoff preserves queued agent records and rejects stale co
     assert.equal(sent[0].actor.conversation_id, actor.conversation_id);
     assert.equal(sent[1].actor.kind, 'human');
     for (const field of ['provider', 'name', 'conversation_source', 'conversation_id']) assert.equal(sent[1].actor[field], undefined);
-    assert.equal((await captureActor(11)).kind, 'unknown');
+    assert.equal((await captureActor(11)).kind, 'human');
     urls.set(10, bridge.endUrl);
     await assert.rejects(connectAgentTab(10, bridge.endUrl), /no longer owns/);
     assert.equal((await captureActor(10)).kind, 'human');

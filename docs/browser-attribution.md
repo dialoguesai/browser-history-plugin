@@ -10,21 +10,21 @@ For automatic Codex attribution in Chrome and Safari, use the bundled
 [local agent handoff](agent-bridge.md). It reads the current chat identity from
 the agent environment and requires no typing into the extension popup.
 
-Open the toolbar popup and choose **Me**, **AI agent**, or **Unknown / detect
-automation**. AI mode requires the provider, agent name, conversation source ID
+Open the toolbar popup and choose **Automatic (default: me)**, **Me**, or **AI agent**. AI mode requires the provider, agent name, conversation source ID
 and conversation ID; a turn ID is optional. Use the source's canonical ID,
 including its namespace prefix (for example `codex:…` in `codex_sessions`). The
 reference remains valid if the chat source has not synced the parent yet.
 
 The toolbar shows a black pointer with a white outline for agent/automation
-control. Human and unresolved tabs have no controller badge. Switching the
+control. Human tabs have no controller badge. Switching the
 visible tab changes only its icon and title, never an event’s saved identity.
 A connection error can still show `!`; this is separate from attribution.
 
 Mode follows a tab across navigation. Explicit AI mode is inherited by tabs
 opened from that tab. Switch to **Me** when taking over. Closing the tab or
-restarting the browser clears its mode. Unknown is the default: the absence of
-an automation signal never proves a human was responsible.
+restarting the browser clears its mode. Ordinary browsing defaults to your activity, recorded as `kind: human`,
+`method: default_human`. This is a product assumption, not proof of detection.
+Named agents and positive automation signals take precedence over that default.
 
 When a browser replaces the underlying tab during navigation, the replacement
 keeps its actor history, session and lease. An explicit choice already made on
@@ -68,7 +68,7 @@ await chrome.runtime.sendMessage(toposExtensionId, {
 
 The owner must allowlist the controller's extension ID first. Web pages and
 content scripts cannot set identities. A stale controller cannot end a newer
-session. Leases expire to unknown. The integration does not create a new TOPOS
+session. Leases expire to the human default. The integration does not create a new TOPOS
 principal or give its caller extra access to data.
 
 ## Detection and delayed tab-switch delivery
@@ -81,10 +81,11 @@ the extension's identity form. It cannot enforce a gate against arbitrary OS
 input or non-cooperating agents.
 
 Visits/tab activations wait up to 2.5 seconds for same-tab follow-up evidence.
-A matching document signal can resolve unknown activity, or add identity to an
+A matching document signal can replace the provisional human default, or add identity to an
 automation hint, before that deadline. The envelope records `method: followup`
 and the identity method; this is a bounded correlation, not proof of who acted
-earlier. Expired/unresolved entries stay unknown. Sent history is not relabelled.
+earlier. Entries without follow-up keep the human default. Explicit Me and
+already-attributed agent records retain their event-time identity; sent history is not relabelled.
 
 Per-tab history avoids assigning a late event to a new controller. Session
 storage survives MV3 worker suspension, not browser shutdown. A recovery alarm
@@ -96,15 +97,18 @@ corresponding Options checkbox to retain actors and deduplicate capture IDs.
 
 Coordinated node/control-plane/frontend changes preserve the envelope in raw
 and canonical activity, expose it in owner recall and timeline results, and add
-**All controllers / Human browsing / AI / bot browsing / Unknown browsing**.
+**All controllers / Human browsing / AI / bot browsing / Unattributed activity**.
+The final category is reserved for incomplete attribution that carries evidence;
+ordinary unmarked history appears as **You** and belongs to Human browsing.
 Filtering happens before counts and pagination. Collapsed runs do not combine
 different controllers, agent sessions or parent conversations.
 
-AI, automation and unknown browser activity stays searchable but does not feed
+AI, automation and incomplete attribution carrying evidence stays searchable but does not feed
 personal entities, topics, goals, facts or monthly interests. Existing mixed
 interest clusters cannot release a label until rebuilt from eligible human
-activity. Legacy records without an actor stay unknown; this is not retroactive
-proof of human browsing. Existing previously derived personal facts are not
+activity. Legacy records without an actor, or with an empty unknown/unresolved
+envelope, use the same human default on read. Their stored history is not rewritten
+and the method distinguishes this assumption from an explicit Me choice. Existing previously derived personal facts are not
 automatically deleted by this change.
 
 The plugin alone cannot update an older node or frontend. Deploy the coordinated

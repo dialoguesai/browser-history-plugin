@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ActorStore, UNKNOWN_ACTOR, validateActor, resolveActor, parseAgentGroup } from '../lib/actor.js';
+import { ActorStore, UNKNOWN_ACTOR, DEFAULT_HUMAN_ACTOR, validateActor, resolveActor, parseAgentGroup } from '../lib/actor.js';
 import { PendingActivity } from '../lib/pendingActivity.js';
 
 export function memoryStorage() {
@@ -16,9 +16,17 @@ const identity = { kind: 'agent', name: 'Codex', provider: 'openai', conversatio
 test('agent requires source-scoped conversation identity', () => {
     assert.throws(() => validateActor({ kind: 'agent', provider: 'openai' }), /conversation/);
     assert.equal(validateActor(identity).conversation_id, identity.conversation_id);
-    assert.equal(resolveActor([], 100, { webdriver: false, is_trusted: true }).kind, 'unknown');
+    assert.equal(resolveActor([], 100, { webdriver: false, is_trusted: true }).kind, 'human');
     assert.equal(resolveActor([], 100, { webdriver: true }).kind, 'automation');
     assert.equal(resolveActor([], 100, { is_trusted: false }).kind, 'automation');
+});
+
+test('ordinary browsing and legacy detection mode default to human without claiming detection', () => {
+    assert.deepEqual(resolveActor([], 100, { webdriver: false, is_trusted: true }), DEFAULT_HUMAN_ACTOR);
+    assert.deepEqual(resolveActor([{ at: 1, actor: UNKNOWN_ACTOR }], 100), DEFAULT_HUMAN_ACTOR);
+    const named = validateActor(identity);
+    assert.equal(resolveActor([{ at: 1, actor: named }], 100, { webdriver: true }).conversation_id, identity.conversation_id);
+    assert.equal(resolveActor([], 100, { agent_tab_group: true }).kind, 'automation');
 });
 
 test('event-time snapshots survive worker restart and handoff, isolated per tab', async () => {
@@ -28,16 +36,16 @@ test('event-time snapshots survive worker restart and handoff, isolated per tab'
     const restarted = new ActorStore(storage);
     assert.equal((await restarted.snapshot(1, {}, 15)).name, 'Codex');
     assert.equal((await restarted.snapshot(1, {}, 25)).kind, 'human');
-    assert.equal((await restarted.snapshot(2, {}, 25)).kind, 'unknown');
+    assert.equal((await restarted.snapshot(2, {}, 25)).kind, 'human');
     assert.equal((await restarted.snapshot(1, { webdriver: true }, 25)).kind, 'automation');
     await restarted.remove(1);
-    assert.equal((await restarted.snapshot(1)).kind, 'unknown');
+    assert.equal((await restarted.snapshot(1)).kind, 'human');
 });
 
-test('controller leases expire to unknown; stale end cannot clear a new controller', async () => {
+test('controller leases expire to the human default; stale end cannot clear a new controller', async () => {
     const store = new ActorStore(memoryStorage());
     const first = await store.set(1, validateActor(identity), { at: 1, expires_at: 5, controller: 'a' });
-    assert.equal((await store.snapshot(1, {}, 6)).kind, 'unknown');
+    assert.equal((await store.snapshot(1, {}, 6)).kind, 'human');
     await store.set(1, validateActor(identity), { at: 7, controller: 'b' });
     await assert.rejects(store.end(1, first.session_id, 'a'), /no longer owns/);
     assert.equal((await store.snapshot(1, {}, 8)).kind, 'agent');
@@ -50,8 +58,8 @@ test('browser tab replacement preserves session, historical handoffs and lease',
     await store.replaceTab(2, 1);
     assert.equal((await store.snapshot(2, {}, 3)).kind, 'human');
     assert.equal((await store.snapshot(2, {}, 10)).session_id, agent.session_id);
-    assert.equal((await store.snapshot(2, {}, 21)).kind, 'unknown');
-    assert.equal((await store.snapshot(1, {}, 10)).kind, 'unknown');
+    assert.equal((await store.snapshot(2, {}, 21)).kind, 'human');
+    assert.equal((await store.snapshot(1, {}, 10)).kind, 'human');
     await store.set(3, validateActor({ kind: 'human' }), { at: 7 });
     await store.replaceTab(3, 2);
     assert.equal((await store.snapshot(3, {}, 10)).kind, 'human');
@@ -89,4 +97,23 @@ test('outbox retries retain a stable capture id', async () => {
     await queue.flush(); fail = false; await queue.flush();
     assert.deepEqual(seen, ['stable', 'stable']);
     assert.deepEqual(await storage.get(null), {});
+});
+
+test('follow-up replaces the provisional human default, preserves explicit Me and sent history', async () => {
+    const storage = memoryStorage(); let now = 100; const sent = [];
+    const queue = new PendingActivity(storage, async item => { sent.push(item.record); return { topos: { sent: true } }; }, { holdMs: 50, now: () => now });
+    const add = (id, actor) => queue.add({ record: { capture_id: id, tab_id: 1, actor } });
+    await add('provisional', DEFAULT_HUMAN_ACTOR);
+    await add('explicit-me', validateActor({ kind: 'human' }));
+    await queue.resolve(1, DEFAULT_HUMAN_ACTOR);
+    assert.equal((await storage.get('pendingActivity:provisional'))['pendingActivity:provisional'].record.actor.method, 'default_human');
+    await queue.resolve(1, validateActor(identity));
+    now = 151;
+    await queue.flush();
+    assert.equal(sent[0].actor.kind, 'agent');
+    assert.equal(sent[0].actor.conversation_id, identity.conversation_id);
+    assert.equal(sent[1].actor.kind, 'human');
+    assert.equal(sent[1].actor.method, 'manual');
+    await queue.resolve(1, validateActor({ kind: 'human' }));
+    assert.equal(sent[0].actor.kind, 'agent');
 });
