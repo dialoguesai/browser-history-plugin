@@ -42,11 +42,13 @@ and approved-controller APIs are separate paths, not part of this live proof.
 This is automatic identity transfer for a cooperating agent, not universal bot
 detection. The integration must be invoked before browser work. Other providers
 need an adapter that obtains their real source-scoped conversation identifiers;
-Codex and Claude Code are built in. Without the handoff, Claude in Chrome looks
-human to the extension: `navigator.webdriver` stays false and its clicks are
-trusted events, so it receives the human default unless it cooperates with the
-handoff. The `default_human` method records the assumption; it is not universal
-bot detection. Use the handoff to retain the actual provider and parent.
+Codex and Claude Code are built in. Without the handoff, Claude in Chrome's
+pages look human: `navigator.webdriver` stays false and its clicks are trusted
+events. The extension still recognises the tab groups it creates (`Claude`,
+`Claude (MCP)`, with or without its ⌛/🔔/✅ status prefix) and records those
+tabs as unidentified automation. A Claude in Chrome tab outside its group
+receives the human default; the `default_human` method records the assumption,
+not proof. Use the handoff to retain the actual provider and parent.
 
 ## Verify before a node release
 

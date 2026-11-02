@@ -73,3 +73,17 @@ test('automation group hints still override the human default on an unassigned t
   await observeGroup(50);
   assert.equal((await captureActor(50)).kind, 'automation');
 });
+
+test('Claude in Chrome groups count as automation without any owner setup', async () => {
+  await handleActorMessage({ type: 'ACTOR_CONTROLLERS', controllers: [], groupNames: [] }, ui);
+  for (const [tabId, groupTitle] of [[60, 'Claude (MCP)'], [61, '⌛Claude']]) {
+    title = groupTitle;
+    await observeGroup(tabId);
+    const actor = await captureActor(tabId);
+    assert.equal(actor.kind, 'automation', groupTitle);
+    assert.equal(actor.method, 'tab_group_hint');
+  }
+  // The owner taking over with Me still wins over the hint.
+  await handleActorMessage({ type: 'ACTOR_SET', tab_id: 61, actor: { kind: 'human' } }, ui);
+  assert.equal((await captureActor(61)).kind, 'human');
+});
