@@ -42,7 +42,10 @@ browsing. Set the entire group title to:
 
 This is a cooperative declaration, not authenticated proof of provider identity.
 A human can edit the title. Ordinary emoji/group names are not treated as AI.
-Owners can optionally list exact known agent group names in the popup; these
+The one built-in exception is Claude in Chrome's own groups, `Claude` and
+`Claude (MCP)`, optionally prefixed with ⌛, 🔔 or ✅. Those tabs are recorded as
+unidentified automation with no provider or parent; a group a human names
+`Claude` is counted the same way. Owners can optionally list exact known agent group names in the popup; these
 are only automation hints and do not invent a provider or parent conversation.
 An explicit per-tab choice takes precedence over a group declaration.
 

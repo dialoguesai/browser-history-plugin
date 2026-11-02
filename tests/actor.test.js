@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ActorStore, UNKNOWN_ACTOR, DEFAULT_HUMAN_ACTOR, validateActor, resolveActor, parseAgentGroup } from '../lib/actor.js';
+import { ActorStore, UNKNOWN_ACTOR, DEFAULT_HUMAN_ACTOR, validateActor, resolveActor, parseAgentGroup, isClaudeInChromeGroup } from '../lib/actor.js';
 import { PendingActivity } from '../lib/pendingActivity.js';
 
 export function memoryStorage() {
@@ -70,6 +70,13 @@ test('explicit tab-group declarations carry identity, ordinary group names do no
     const title = '[TOPOS AI] ' + ['Codex', 'openai', 'codex_sessions', 'codex:chat | 1'].map(encodeURIComponent).join(' | ');
     assert.equal(parseAgentGroup(title).conversation_id, 'codex:chat | 1');
     assert.equal(parseAgentGroup('[TOPOS AI] incomplete'), null);
+});
+
+test('Claude in Chrome group names are recognised with or without a status prefix', () => {
+    for (const title of ['Claude', 'Claude (MCP)', '⌛Claude', '🔔Claude (MCP)', '✅ Claude']) assert.equal(isClaudeInChromeGroup(title), true, title);
+    for (const title of ['', 'Claude research', 'claude', '🔎 Claude', null]) assert.equal(isClaudeInChromeGroup(title), false, String(title));
+    // A hint, never an identity: the group names no conversation.
+    assert.equal(parseAgentGroup('Claude (MCP)'), null);
 });
 
 test('bounded follow-up fills only pending activity in the same tab/document', async () => {
