@@ -46,7 +46,8 @@ Codex and Claude Code are built in. Without the handoff, Claude in Chrome's
 pages look human: `navigator.webdriver` stays false and its clicks are trusted
 events. The extension still recognises the tab groups it creates (`Claude`,
 `Claude (MCP)`, with or without its ⌛/🔔/✅ status prefix) and records those
-tabs as unidentified automation. A Claude in Chrome tab outside its group
+tabs as automation named `Claude` (`Anthropic`), without a parent. Codex tabs
+are named the same way from Codex's favicon badge. A Claude in Chrome tab outside its group
 receives the human default; the `default_human` method records the assumption,
 not proof. Use the handoff to retain the actual provider and parent.
 

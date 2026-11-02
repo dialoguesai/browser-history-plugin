@@ -42,10 +42,19 @@ browsing. Set the entire group title to:
 
 This is a cooperative declaration, not authenticated proof of provider identity.
 A human can edit the title. Ordinary emoji/group names are not treated as AI.
-The one built-in exception is Claude in Chrome's own groups, `Claude` and
-`Claude (MCP)`, optionally prefixed with ⌛, 🔔 or ✅. Those tabs are recorded as
-unidentified automation with no provider or parent; a group a human names
-`Claude` is counted the same way. Owners can optionally list exact known agent group names in the popup; these
+Two browser agents are recognised without any setup, and named:
+
+- Claude in Chrome's own groups, `Claude` and `Claude (MCP)`, optionally
+  prefixed with ⌛, 🔔 or ✅, record `Claude` (`Anthropic`), method
+  `tab_group_hint`. A group a human names `Claude` is counted the same way.
+- A tab whose favicon carries Codex's control badge (the ChatGPT extension's
+  `data-codex-favicon-badge` SVG) records `Codex` (`OpenAI`), method
+  `favicon_badge`. Codex names its groups after the task, so the group title
+  cannot identify it.
+
+These records stay `automation`: they name the agent but no parent
+conversation, which only the handoff supplies. Cursor browses in its own
+built-in browser and leaves no trace in Chrome or Dia. Owners can optionally list exact known agent group names in the popup; these
 are only automation hints and do not invent a provider or parent conversation.
 An explicit per-tab choice takes precedence over a group declaration.
 

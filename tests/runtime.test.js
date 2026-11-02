@@ -6,13 +6,13 @@ const memory = () => {
   return { async get(keys) { return structuredClone(keys == null ? data : typeof keys === 'string' ? { [keys]: data[keys] } : Object.fromEntries(keys.map(k => [k, data[k]]))); }, async set(v) { Object.assign(data, structuredClone(v)); }, async remove(k) { delete data[k]; } };
 };
 const event = () => ({ listeners: [], addListener(listener) { this.listeners.push(listener); } });
-let title = '', clock = 100;
+let title = '', favicon = '', clock = 100;
 const realNow = Date.now;
 Date.now = () => clock;
 globalThis.chrome = {
   storage: { session: memory(), local: memory(), sync: memory() },
   runtime: { id: 'plugin', getURL: path => `chrome-extension://plugin/${path}`, onMessageExternal: event() },
-  tabs: { get: async id => ({ id, groupId: 1 }), query: async () => [{ id: 1 }], onCreated: event(), onRemoved: event(), onUpdated: event(), onReplaced: event() },
+  tabs: { get: async id => ({ id, groupId: 1, favIconUrl: favicon }), query: async () => [{ id: 1 }], onCreated: event(), onRemoved: event(), onUpdated: event(), onReplaced: event() },
   tabGroups: { get: async () => ({ id: 1, title }), onUpdated: event(), onRemoved: event() },
   action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {} }
 };
@@ -82,8 +82,22 @@ test('Claude in Chrome groups count as automation without any owner setup', asyn
     const actor = await captureActor(tabId);
     assert.equal(actor.kind, 'automation', groupTitle);
     assert.equal(actor.method, 'tab_group_hint');
+    assert.equal(`${actor.name} (${actor.provider})`, 'Claude (Anthropic)');
   }
   // The owner taking over with Me still wins over the hint.
   await handleActorMessage({ type: 'ACTOR_SET', tab_id: 61, actor: { kind: 'human' } }, ui);
   assert.equal((await captureActor(61)).kind, 'human');
+});
+
+test('a Codex favicon badge names Codex, and clears when the badge goes', async () => {
+  title = 'Book a table';  // Codex names groups after the task, so the title proves nothing.
+  favicon = 'data:image/svg+xml,' + encodeURIComponent('<svg data-codex-favicon-badge="codex-favicon-badge"></svg>');
+  await observeGroup(70);
+  const actor = await captureActor(70);
+  assert.deepEqual([actor.kind, actor.method, actor.name, actor.provider], ['automation', 'favicon_badge', 'Codex', 'OpenAI']);
+  assert.equal(actor.conversation_id, undefined);
+  favicon = 'https://example.com/favicon.ico';
+  await observeGroup(70);
+  assert.equal((await captureActor(70)).kind, 'human');
+  favicon = '';
 });

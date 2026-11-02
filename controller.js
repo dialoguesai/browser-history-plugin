@@ -18,7 +18,7 @@ try {
     fields.forEach(field => { $(field).value = actor[field] || ''; });
     $('controllers').value = controllers.join('\n');
     $('group-names').value = groupNames.join('\n');
-    $('status').textContent = actor.kind === 'agent' ? `${actor.name} · ${actor.provider}` : actor.kind === 'automation' ? 'Automation detected. Identify the agent to link its conversation.' : isDefaultHuman(actor) || actor.kind === 'unknown' ? 'This tab defaults to your activity.' : 'This tab is marked as your activity.';
+    $('status').textContent = actor.kind === 'agent' ? `${actor.name} · ${actor.provider}` : actor.kind === 'automation' && actor.name ? `${actor.name} · ${actor.provider} detected. Identify its conversation to link it.` : actor.kind === 'automation' ? 'Automation detected. Identify the agent to link its conversation.' : isDefaultHuman(actor) || actor.kind === 'unknown' ? 'This tab defaults to your activity.' : 'This tab is marked as your activity.';
     showFields();
 } catch (error) { $('status').textContent = error.message; }
 $('actor-form').addEventListener('submit', async event => {
