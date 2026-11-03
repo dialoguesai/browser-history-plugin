@@ -101,3 +101,15 @@ test('a Codex favicon badge names Codex, and clears when the badge goes', async 
   assert.equal((await captureActor(70)).kind, 'human');
   favicon = '';
 });
+
+test('the identify button is offered for unnamed automation only', async () => {
+  const hint = tabId => handleActorMessage({ type: 'AUTOMATION_HINT', webdriver: false }, { id: 'plugin', frameId: 0, documentId: `doc-${tabId}`, tab: { id: tabId } });
+  title = '⌛Claude';
+  await observeGroup(80);
+  assert.equal((await hint(80)).identify, false);
+  title = 'Agent research';
+  await handleActorMessage({ type: 'ACTOR_CONTROLLERS', controllers: [], groupNames: [title] }, ui);
+  await observeGroup(81);
+  assert.equal((await hint(81)).identify, true);
+  title = '';
+});
