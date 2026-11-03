@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ActorStore, UNKNOWN_ACTOR, DEFAULT_HUMAN_ACTOR, validateActor, resolveActor, parseAgentGroup, isClaudeInChromeGroup } from '../lib/actor.js';
+import { ActorStore, UNKNOWN_ACTOR, DEFAULT_HUMAN_ACTOR, validateActor, resolveActor, parseAgentGroup, isClaudeInChromeGroup, isCodexBadgedFavicon } from '../lib/actor.js';
 import { PendingActivity } from '../lib/pendingActivity.js';
 
 export function memoryStorage() {
@@ -77,6 +77,14 @@ test('Claude in Chrome group names are recognised with or without a status prefi
     for (const title of ['', 'Claude research', 'claude', '🔎 Claude', null]) assert.equal(isClaudeInChromeGroup(title), false, String(title));
     // A hint, never an identity: the group names no conversation.
     assert.equal(parseAgentGroup('Claude (MCP)'), null);
+});
+
+test('only the Codex badge marker in an SVG favicon counts as Codex', () => {
+    const svg = markup => 'data:image/svg+xml,' + encodeURIComponent(markup);
+    assert.equal(isCodexBadgedFavicon(svg('<svg data-codex-favicon-badge="codex-favicon-badge"><path/></svg>')), true);
+    for (const url of [svg('<svg><path/></svg>'), 'https://example.com/favicon.ico', 'data:image/svg+xml,%E0%A4%A', '', undefined]) {
+        assert.equal(isCodexBadgedFavicon(url), false, String(url));
+    }
 });
 
 test('bounded follow-up fills only pending activity in the same tab/document', async () => {
