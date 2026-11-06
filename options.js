@@ -11,6 +11,7 @@ import {
     preflightGrantConnect
 } from './lib/grantAccess.js';
 import { registerInstallRedirects, redirectUrisForThisInstall } from './lib/registerRedirect.js';
+import { DEFAULT_LOCAL_TOPOS_URL, probeLocalTopos } from './lib/toposIngest.js';
 
 const urlInput = document.getElementById('supabaseUrl');
 const keyInput = document.getElementById('anonKey');
@@ -24,6 +25,12 @@ const detachDialoguesBtn = document.getElementById('detachDialogues');
 const attachStatusSpan = document.getElementById('attachStatus');
 const redirectSetupStatus = document.getElementById('redirectSetupStatus');
 const retryRedirectSetupBtn = document.getElementById('retryRedirectSetup');
+const localUrlInput = document.getElementById('toposLocalUrl');
+const localKeyInput = document.getElementById('toposLocalKey');
+const connectLocalBtn = document.getElementById('connectLocalTopos');
+const disconnectLocalBtn = document.getElementById('disconnectLocalTopos');
+const localStatusSpan = document.getElementById('localToposStatus');
+const localCommandPre = document.getElementById('localPusherCommand');
 
 let grantQueryHandled = false;
 
@@ -77,6 +84,63 @@ function setAttachStatus(message, color = '') {
     attachStatusSpan.textContent = message || '';
     attachStatusSpan.style.color = color || '';
 }
+
+// ---------------------------------------------------------------- local node
+function setLocalStatus(message, color = '') {
+    localStatusSpan.textContent = message || '';
+    localStatusSpan.style.color = color || '';
+}
+
+/** The exact enrolment command for THIS install: the origin is this extension's own, never a wildcard. */
+function localPusherCommand() {
+    const origin = new URL(chrome.runtime.getURL('')).origin;
+    return `topos-node pushers add browser-history-plugin --sources browser_visits,browser_events --origin ${origin}`;
+}
+
+function updateLocalUI(items) {
+    const connected = !!items.toposLocalKey;
+    connectLocalBtn.style.display = connected ? 'none' : 'inline-flex';
+    disconnectLocalBtn.style.display = connected ? 'inline-flex' : 'none';
+    localKeyInput.disabled = connected;
+    localUrlInput.value = items.toposLocalUrl || DEFAULT_LOCAL_TOPOS_URL;
+    if (connected) {
+        localKeyInput.value = '';
+        localKeyInput.placeholder = 'key saved on this computer';
+        const sources = Array.isArray(items.toposLocalSources) && items.toposLocalSources.length
+            ? ` (writes ${items.toposLocalSources.join(', ')})` : '';
+        setLocalStatus(`Connected to the local Topos${sources}`, 'green');
+    } else {
+        localKeyInput.placeholder = 'tpw_browser-history-plugin.…';
+        setLocalStatus('');
+    }
+}
+
+connectLocalBtn.addEventListener('click', async () => {
+    const url = localUrlInput.value.trim() || DEFAULT_LOCAL_TOPOS_URL;
+    const key = localKeyInput.value.trim();
+    if (!key) {
+        setLocalStatus('Paste the key the terminal printed.', 'red');
+        return;
+    }
+    setLocalStatus('Checking the key with the node…');
+    try {
+        const me = await probeLocalTopos(url, key);
+        await installationStorage.set({ toposLocalUrl: url, toposLocalKey: key, toposLocalSources: me.sources || [] });
+        await installationStorage.remove(['dialoguesConnectionExpired', 'dialoguesEngineWarning']);
+        localKeyInput.value = '';
+        updateLocalUI({ toposLocalKey: key, toposLocalUrl: url, toposLocalSources: me.sources || [] });
+    } catch (e) {
+        const status = e?.status ? ` (${e.status})` : '';
+        setLocalStatus(`The node did not accept the key${status}: ${e?.message || e}`, 'red');
+    }
+});
+
+disconnectLocalBtn.addEventListener('click', async () => {
+    await installationStorage.remove(['toposLocalKey', 'toposLocalSources', 'dialoguesConnectionExpired', 'dialoguesEngineWarning']);
+    localKeyInput.value = '';
+    updateLocalUI({ toposLocalUrl: localUrlInput.value.trim() });
+    setLocalStatus('Disconnected here. The node still holds the enrolment until you run `topos-node pushers disconnect browser-history-plugin`.');
+});
 
 function showRedirectSetup(message, kind = 'warn') {
     redirectSetupStatus.style.display = 'block';
@@ -379,7 +443,10 @@ async function loadStarredWebsites() {
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
     void parseGrantRedirectQuery();
-    const local = await installationStorage.get({ device_name: '', dialoguesToken: '', dialoguesResourceId: '' });
+    const local = await installationStorage.get({ device_name: '', dialoguesToken: '', dialoguesResourceId: '',
+        toposLocalKey: '', toposLocalUrl: '', toposLocalSources: [] });
+    localCommandPre.textContent = localPusherCommand();
+    updateLocalUI(local);
     const items = await chrome.storage.sync.get({
         supabaseActorColumns: false,
         supabaseUrl: '',

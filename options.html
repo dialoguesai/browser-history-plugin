@@ -144,6 +144,27 @@
             <span id="attachStatus"></span>
         </div>
         <p class="hint">Revoke access anytime in Topos → Sharing → Connected apps.</p>
+
+        <h2 style="font-size:1rem;margin:1.5rem 0 0.25rem;">Local Topos (no account)</h2>
+        <p class="hint">A Topos running on this computer can take your browsing directly, with no Dialogues account.
+            In a terminal on this computer run:</p>
+        <pre id="localPusherCommand" style="white-space:pre-wrap;word-break:break-all;font-size:0.85rem;padding:0.5rem;border:1px solid #d1d5db;border-radius:6px;"></pre>
+        <p class="hint">Topos asks you to confirm, then prints a key once. Paste it here.</p>
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+            <label for="toposLocalUrl" style="margin:0;white-space:nowrap;">Node address</label>
+            <input id="toposLocalUrl" type="text" placeholder="http://127.0.0.1:8676" style="flex:1;min-width:0;" />
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+            <label for="toposLocalKey" style="margin:0;white-space:nowrap;">App key</label>
+            <input id="toposLocalKey" type="password" placeholder="tpw_browser-history-plugin.…" autocomplete="off" style="flex:1;min-width:0;" />
+        </div>
+        <div class="row-actions">
+            <button type="button" id="connectLocalTopos" class="attach">Connect local Topos</button>
+            <button type="button" id="disconnectLocalTopos" class="attach" style="display:none;">Disconnect local Topos</button>
+            <span id="localToposStatus"></span>
+        </div>
+        <p class="hint">While a local key is set, browsing goes to the local node and not to Dialogues. Disconnect
+            on the node with <code>topos-node pushers disconnect browser-history-plugin</code>.</p>
     </section>
 
     <section id="panel-supabase" class="panel" data-panel="supabase" role="tabpanel" hidden>
