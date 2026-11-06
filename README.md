@@ -78,6 +78,31 @@ You choose what matters; skip lists keep noise out of your graph.
 
 **Access** lasts until you revoke it. After attach, you typically do not need to reconnect unless you revoke access or clear extension storage.
 
+### Local first: a Topos with no account
+
+A Topos node running on this computer can take your browsing directly, with no Dialogues account and no
+control plane in between. The node does the same checks the control plane does on the account path: the key
+names this extension, the owner named which sources it may write, every batch is deduplicated by its
+`write_id`, and CORS answers only this extension's own origin (never `chrome-extension://*`).
+
+```text
+  You browse  →  Extension  →  http://127.0.0.1:8676  (your Topos node)
+```
+
+1. Open **Options → Topos → Local Topos**. It shows the exact command for this install, like
+
+   ```bash
+   topos-node pushers add browser-history-plugin --sources browser_visits,browser_events --origin chrome-extension://<this extension's id>
+   ```
+
+2. Run it in a terminal on this computer. Topos asks you to confirm, then prints a key **once**.
+3. Paste the key into **App key** and click **Connect local Topos**. The extension asks the node what the key
+   is good for and saves it only if the node answers.
+
+While a local key is set, browsing goes to the local node and not to Dialogues. Connecting an account later
+(`topos-node setup --connect`) keeps every row the extension wrote. Revoke on the node with
+`topos-node pushers disconnect browser-history-plugin`; the extension drops a key the node no longer accepts.
+
 Registered on Dialogues as app **`browser-history-plugin`** (public PKCE client; no platform secret in the extension).
 
 ### Build your own third-party app

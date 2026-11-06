@@ -128,12 +128,20 @@ async function applyToposIngestResult(result, sourceId, recordCount = 1) {
         toposIngestFailureStreak = 0;
         console.warn('[APP_INGEST] Token rejected:', result.status, result.body || '');
         await setDialoguesErrorBadge(true);
+        const local = result.target === 'local';
         chrome.notifications?.create({
             type: 'basic',
             iconUrl: 'icons/icon-48.png',
-            title: 'Dialogues Connection Expired',
-            message: 'Please re-attach Dialogues in the extension options.'
+            title: local ? 'Local Topos key no longer works' : 'Dialogues Connection Expired',
+            message: local
+                ? 'Run `topos-node pushers add browser-history-plugin …` again and paste the new key in the extension options.'
+                : 'Please re-attach Dialogues in the extension options.'
         });
+        return;
+    }
+    if (result.reason === 'refused' || result.reason === 'rejected') {
+        // The node answered and said no for this batch: not a connection problem, so no badge latch.
+        console.warn('[APP_INGEST] Local Topos declined', sourceId, result.status, result.body || '');
         return;
     }
     if (result.sent) {
