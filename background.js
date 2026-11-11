@@ -1,4 +1,5 @@
 import { installationStorage } from './lib/installationStorage.js';
+import { openFirstRun } from './lib/agentSetup.js';
 console.log('[BACKGROUND] Service worker started');
 import { captureActor, actorBadge, handleActorMessage, bindPending } from './lib/actorRuntime.js';
 import { PendingActivity } from './lib/pendingActivity.js';
@@ -596,7 +597,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // Context menu: Star Site
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
+    void openFirstRun(details, chrome.runtime).catch(error => console.warn('[SETUP] Could not open connection settings:', error));
     try {
         chrome.contextMenus.create({
             id: 'star-site',

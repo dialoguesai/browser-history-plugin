@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Set up your AI tool · TOPOS</title><link rel="stylesheet" href="ai-setup.css"></head>
+<body><main>
+<a href="options.html">← Connection settings</a>
+<p class="eyebrow">TOPOS · BROWSER HISTORY</p>
+<h1>Your browsing. Your agent’s work.<br>Clearly separate.</h1>
+<p class="intro">See who used the browser and return to the conversation behind an AI visit.</p>
+<section><h2>1. Connect your history</h2><p><a href="options.html">Attach Dialogues in connection settings</a>, then browse as usual. No AI setup is needed to capture your own activity.</p></section>
+<section><h2>2. Set up your AI tool once</h2>
+<p>Choose a tool that runs on this computer and can control this browser. Copy the request below into that tool.</p>
+<label for="tool">Your work tool</label><select id="tool"><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
+<label for="setup-prompt">Setup request</label><textarea id="setup-prompt" readonly rows="8"></textarea>
+<button id="copy" type="button">Copy setup request</button><p id="copy-status" role="status" aria-live="polite"></p>
+<p class="hint">The tool installs instructions and a small local helper from this open-source repository. It preserves existing instructions and shows the files it will change. It does not change browser permissions or attach your account.</p>
+<details><summary>Prefer the terminal?</summary><p>From the downloaded repository, with Node 20 or newer:</p><pre id="install-command"></pre><p>Omit <code>--dry-run</code> to install after reviewing the paths. Start a new chat afterward.</p></details>
+</section>
+<section><h2>3. Check it works</h2><p>In a new chat, ask your tool to open a page using TOPOS attribution. Before browsing, it should show <strong>Attributed to Codex</strong> or <strong>Attributed to Claude</strong>, and the extension icon should gain a cursor.</p><p>In your TOPOS timeline, check the visit’s AI name, provider, and parent conversation. Opening the conversation also requires that chat source to be synced. When the tool finishes, the cursor should clear.</p></section>
+<aside><h2>What is automatic?</h2><p>The extension can recognize some AI tab badges or groups without setup. Those signals can name the agent, but cannot identify its conversation. The handoff supplies that link.</p><p>The setup guides a cooperating work tool; it cannot force every browser action to identify itself. Claude Code requires a real session ID exposed to the helper. Claude’s regular chat mode, other tools, and remote agents are not covered by this installer. If identity is unavailable, the tool must report that instead of guessing.</p></aside>
+<footer><a href="https://github.com/dialoguesai/browser-history-plugin/blob/main/docs/ai-tool-setup.md" target="_blank" rel="noopener noreferrer">Setup, troubleshooting, and removal</a> · <a href="https://github.com/dialoguesai/browser-history-plugin" target="_blank" rel="noopener noreferrer">Source code</a></footer>
+</main><script type="module" src="ai-setup.js"></script></body></html>

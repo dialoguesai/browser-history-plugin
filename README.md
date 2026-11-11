@@ -40,7 +40,12 @@ Your browser already keeps browsing history. You can search it, scroll it, and r
 
 ---
 
-## Browser controller attribution (3.1 candidate)
+## Browser controller attribution
+
+**New users:** open **Connection settings → Set up your AI tool** for a copyable
+setup request, or follow [AI tool setup](docs/ai-tool-setup.md). The repository
+includes a portable installer for Codex and Claude Code; no developer-specific
+files are needed. Ordinary history capture works without this optional step.
 
 Codex can declare its real agent/provider and parent conversation automatically
 before controlling a Chrome or Safari tab, with no identity form entry.
@@ -49,7 +54,7 @@ The toolbar adds a cursor only for agent/automation tabs; human and unassigned
 tabs keep the clean colored icon. Capture attribution is independent of this display.
 [Setup and integration contract](docs/browser-attribution.md) · [Tested browser support](docs/browser-support.md).
 The coordinated TOPOS node/UI changes are required for downstream filtering and
-personal-interest exclusion. This candidate is not yet a deployed release.
+personal-interest exclusion. See the support matrix for tested node/browser versions.
 
 ## What it captures
 
@@ -75,6 +80,7 @@ You choose what matters; skip lists keep noise out of your graph.
 2. Open **Options → Topos** and click **Attach Dialogues**.
 3. Sign in and approve access on Dialogues (standard consent screen).
 4. Browse as usual—activity syncs in the background.
+5. If an AI tool controls your browser, choose **Set up your AI tool** in connection settings to link its visits to its conversations.
 
 **Access** lasts until you revoke it. After attach, you typically do not need to reconnect unless you revoke access or clear extension storage.
 
@@ -89,6 +95,12 @@ Step-by-step integrator tutorials (register app → Dialogues auth → extension
 ---
 
 ## Install from GitHub
+
+Download and unzip **browser-history-plugin-v3.2.0.zip** from the
+[3.2.0 release](https://github.com/dialoguesai/browser-history-plugin/releases/tag/v3.2.0),
+or clone the repository below. The ZIP includes the extension and optional AI-tool
+installer. It is an unpacked Chromium extension, not a Chrome Web Store package
+or a signed Safari application.
 
 ```bash
 git clone https://github.com/DialoguesAi/browser-history-plugin.git
@@ -169,7 +181,7 @@ Licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Version
 
-**3.1.0 candidate** — Dialogues Browser History (Manifest V3)
+**3.2.0** — Dialogues Browser History (Manifest V3)
 
 
 ## Toolbar artwork
