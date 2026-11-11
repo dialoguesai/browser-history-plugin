@@ -42,6 +42,11 @@ Your browser already keeps browsing history. You can search it, scroll it, and r
 
 ## Browser controller attribution (3.1 candidate)
 
+**New users:** open **Connection settings → Set up your AI tool** for a copyable
+setup request, or follow [AI tool setup](docs/ai-tool-setup.md). The repository
+includes a portable installer for Codex and Claude Code; no developer-specific
+files are needed. Ordinary history capture works without this optional step.
+
 Codex can declare its real agent/provider and parent conversation automatically
 before controlling a Chrome or Safari tab, with no identity form entry.
 [Automatic agent handoff](docs/agent-bridge.md) includes the bundled local helper.
@@ -75,6 +80,7 @@ You choose what matters; skip lists keep noise out of your graph.
 2. Open **Options → Topos** and click **Attach Dialogues**.
 3. Sign in and approve access on Dialogues (standard consent screen).
 4. Browse as usual—activity syncs in the background.
+5. If an AI tool controls your browser, choose **Set up your AI tool** in connection settings to link its visits to its conversations.
 
 **Access** lasts until you revoke it. After attach, you typically do not need to reconnect unless you revoke access or clear extension storage.
 

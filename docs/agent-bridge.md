@@ -1,5 +1,9 @@
 # Automatic local-agent handoff
 
+For one-time setup that makes this part of a work tool's default workflow, see
+[AI tool setup](ai-tool-setup.md). The portable installer and skill template live
+in this repository; the steps below describe the runtime protocol.
+
 The bundled Codex and Claude Code adapters work after normal installation,
 website permissions, and (for delivery) Attach Dialogues. The agent performs the
 handoff. The owner never needs to fill in the agent identity fields.
